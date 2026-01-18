@@ -1,0 +1,101 @@
+/**
+ * @file_name: CSA_DataBridge_DEV012_MockMode_v1_0.gs
+ * @title: CSA v1.0.0 Data Bridge — DEV012 Mock Mode
+ * @version: v1.0.0
+ * @Org_date_time: 2026-01-05 12:34 MST
+ * @Last Updated: 2026-01-05 12:34 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV012
+ *
+ * @description:
+ *   DEV012 Mock Mode support for CSA.
+ *   When CSA_MOCK_MODE === TRUE, returns synthetic incident data
+ *   for DEV/QA purposes (cluster validation, UX testing).
+ *
+ * @notes:
+ *   - Sheet remains authoritative when mock mode disabled
+ *   - No schema changes
+ *   - Read-only
+ *   - PROD-safe when CSA_MOCK_MODE = FALSE
+ */
+
+/**
+ * ARCHIVED FILE — DO NOT EXECUTE
+ *
+ * Original Name: CSA_DataBridge_v1_1_DEV020.gs
+ * Archived On: 2026-01-14
+ * Reason:
+ *   DEV020 review build superseded by CSA_DataBridge_v1_2.gs
+ *   Preserved for rollback, audit, and diff reference.
+ */
+
+
+/* Comment by Tim & DEV012
+function CSA_GetIncidentData_LEGACY() {
+  const props = PropertiesService.getScriptProperties();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE')).toUpperCase();
+
+  if (mockMode === 'TRUE') {
+    Logger.log('CSA DEV012: Mock Mode ENABLED');
+    return {
+      incidents: CSA_DEV012_GenerateMockIncidents_(),
+      source: 'MOCK'
+    };
+  }
+
+  Logger.log('CSA DEV012: Mock Mode DISABLED — using sheet');
+  return CSA_GetIncidentData_FromSheet_();
+}
+*/
+
+/**
+ * DEV012 — Sheet-backed incident fetch (unchanged behavior)
+ */
+function CSA_GetIncidentData_FromSheet_() {
+  const props = PropertiesService.getScriptProperties();
+  const ss = SpreadsheetApp.openById(props.getProperty('CSA_SPREADSHEET_ID'));
+  const sheet = ss.getSheetByName('test3_incident_data');
+
+  if (!sheet) {
+    throw new Error('CSA: test3_incident_data sheet not found');
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+
+  const incidents = values.map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i]);
+    return obj;
+  });
+
+  return {
+    incidents: incidents,
+    source: 'SHEET'
+  };
+}
+
+/**
+ * DEV012 — Synthetic incident generator
+ * Produces dense spatial data to force clustering.
+ * Corrected baseLat/baseLng for CCHS -tc 01-06-2026
+ */
+
+function CSA_DEV012_GenerateMockIncidents_() {
+  const baseLat = 33.377057;
+  const baseLng = -112.145394;
+  const incidents = [];
+
+  for (let i = 0; i < 25; i++) {
+    incidents.push({
+      incident_type: 'Mock Incident',
+      description: 'DEV012 Synthetic Incident #' + (i + 1),
+      latitude: baseLat + (Math.random() * 0.01),
+      longitude: baseLng + (Math.random() * 0.01),
+      timestamp: new Date(Date.now() - i * 3600000).toISOString()
+    });
+  }
+
+  return incidents;
+}
