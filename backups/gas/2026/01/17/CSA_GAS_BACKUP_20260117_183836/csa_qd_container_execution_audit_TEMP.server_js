@@ -1,0 +1,102 @@
+/**
+ * Title: CSA v1 — Q&D Container + Execution Context Audit (TEMP)
+ * Product: Church Safety Alerts (CSA)
+ * Version: v0.1.0
+ * Binder Type: Technical / QA
+ * Current Phase: DEV021 — Diagnostic
+ * Thread Lineage: DEV020 → DEV021
+ * Create Date: 2026-01-15 11:02 MST
+ * Last Updated: 2026-01-15 11:02 MST
+ * Authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV021
+ *
+ * TEMP FILE NOTICE:
+ * - Diagnostic only
+ * - Safe to delete during GAS hygiene
+ * - No writes performed
+ *
+ * PURPOSE:
+ * - Confirm container binding
+ * - Confirm spreadsheet identity
+ * - Confirm script identity
+ * - Confirm execution surface (Sheet vs WebApp)
+ * - Confirm presence of DEV021 symbols
+ */
+
+function csa_qd_run_container_execution_audit() {
+  const log = (m) => Logger.log(m);
+
+  log("===== CSA Q&D CONTAINER + EXECUTION AUDIT =====");
+
+  // ------------------------------------------------------------------
+  // Script identity
+  // ------------------------------------------------------------------
+  const scriptId = ScriptApp.getScriptId();
+  log(`Script ID: ${scriptId}`);
+
+  // ------------------------------------------------------------------
+  // Container binding
+  // ------------------------------------------------------------------
+  let containerInfo = "UNKNOWN";
+  let ss = null;
+  try {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+    containerInfo = ss ? "CONTAINER-BOUND (Spreadsheet)" : "NOT BOUND";
+  } catch (e) {
+    containerInfo = "NOT CONTAINER-BOUND (Exception)";
+  }
+  log(`Binding Status: ${containerInfo}`);
+
+  if (ss) {
+    log(`Bound Spreadsheet Name: ${ss.getName()}`);
+    log(`Bound Spreadsheet ID: ${ss.getId()}`);
+    log(`Bound Spreadsheet URL: ${ss.getUrl()}`);
+  }
+
+  // ------------------------------------------------------------------
+  // Script Properties
+  // ------------------------------------------------------------------
+  const props = PropertiesService.getScriptProperties().getProperties();
+  log("---- Script Properties ----");
+  Object.keys(props)
+    .sort()
+    .forEach(k => log(`${k} = ${props[k]}`));
+  log("---------------------------");
+
+  // ------------------------------------------------------------------
+  // Execution surface detection
+  // ------------------------------------------------------------------
+  const isWebApp = typeof HtmlService !== "undefined" &&
+                   typeof ContentService !== "undefined";
+
+  log(`Execution Surface Guess: ${isWebApp ? "WEBAPP-CAPABLE" : "EDITOR / SHEET"}`);
+
+  // ------------------------------------------------------------------
+  // DEV021 symbol visibility
+  // ------------------------------------------------------------------
+  log("---- DEV021 Symbol Visibility ----");
+  log(`CSA_GetActiveSafetyZone      : ${typeof this.CSA_GetActiveSafetyZone}`);
+  log(`CSA_GetActiveSafetyZone_     : ${typeof this.CSA_GetActiveSafetyZone_}`);
+  log(`CSA_Route_                   : ${typeof this.CSA_Route_}`);
+  log(`doGet                        : ${typeof this.doGet}`);
+  log("----------------------------------");
+
+  // ------------------------------------------------------------------
+  // Deployment inventory (best-effort)
+  // ------------------------------------------------------------------
+  try {
+    const deployments = ScriptApp.getDeployments();
+    log(`Deployment Count: ${deployments.length}`);
+    deployments.forEach((d, i) => {
+      log(`Deployment[${i}]`);
+      log(`  ID: ${d.getDeploymentId()}`);
+      log(`  Description: ${d.getDescription()}`);
+      log(`  Config Count: ${d.getDeploymentConfig().length}`);
+    });
+  } catch (e) {
+    log("Deployment inventory unavailable (permissions or legacy context).");
+  }
+
+  log("===== END CSA Q&D AUDIT =====");
+}
