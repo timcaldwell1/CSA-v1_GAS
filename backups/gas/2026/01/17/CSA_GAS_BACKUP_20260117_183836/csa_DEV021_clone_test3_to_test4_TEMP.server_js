@@ -1,0 +1,41 @@
+/**
+ * @file_name: csa_DEV021_clone_test3_to_test4_TEMP.gs
+ * @title: CSA DEV021 — Clone test3_* to test4_* (TEMP)
+ * @product: Church Safety Alerts (CSA)
+ * @version: v0.1.0
+ * @date_time: 2026-01-15 08:31 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV021
+ *
+ * TEMP FILE NOTICE:
+ * - This file is temporary / one-off.
+ * - Candidate for deletion during GAS hygiene.
+ * - Do not treat as production module unless promoted by decision log entry.
+ */
+
+function csa_DEV021_Clone_Test3_To_Test4_TEMP_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const pairs = [
+    { src: 'test3_incident_data', dest: 'test4_incident_data' },
+    { src: 'test3_safety_zones',  dest: 'test4_safety_zones' }
+  ];
+
+  pairs.forEach(pair => {
+    const srcSheet = ss.getSheetByName(pair.src);
+    if (!srcSheet) {
+      throw new Error(`Source sheet not found: ${pair.src}`);
+    }
+
+    let destSheet = ss.getSheetByName(pair.dest);
+    if (destSheet) {
+      ss.deleteSheet(destSheet);
+    }
+
+    srcSheet.copyTo(ss).setName(pair.dest);
+    Logger.log(`DEV021: Copied ${pair.src} → ${pair.dest}`);
+  });
+
+  Logger.log('DEV021: test3_* sheets cloned to test4_* successfully.');
+}
