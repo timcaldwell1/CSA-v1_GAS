@@ -1,0 +1,496 @@
+<!--
+  @file_name: CSA_AppShell.html
+  @title: CSA WebApp AppShell (DEV013 P1 — UX State Signaling)
+  @version: v1.3.0
+  @Org_date_time: 2026-01-06
+  @Last Updated: 2026-01-07 08:20 MST
+  @authors:
+    Tim Caldwell,
+    ChatGPT, DEV011,
+    ChatGPT, DEV012,
+    ChatGPT, DEV013
+
+  @description:
+    CSA WebApp UI shell:
+      - Leaflet map
+      - Marker clustering (MarkerCluster)
+      - Marker <-> Card interaction support
+      - DEV013 P1 adds UX State Signaling (UI-only):
+          * Loading state
+          * Empty-state messaging
+          * Stale-data indicator (presentation only)
+
+  @notes:
+    - UI-only changes (no server logic changes)
+    - Uses google.script.run only (no /exec fetch)
+    - No schema changes
+    - No auth changes
+    - DEV014 investigated cluster offset; root cause traced to DEV012 mock data
+-->
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>CSA — Safety Dashboard</title>
+
+    <!-- Leaflet -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+
+    <!-- Leaflet MarkerCluster -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+    />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #0b1220;
+        --panel2: #111b2f;
+        --text: #e5e7eb;
+        --muted: #cbd5e1;
+        --border: rgba(255, 255, 255, 0.10);
+        --accent: #5eead4;
+        --warn: #fbbf24;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 1.3fr 0.7fr;
+        height: 100vh;
+        gap: 0;
+      }
+
+      #map {
+        width: 100%;
+        height: 100vh;
+      }
+
+      .sidebar {
+        height: 100vh;
+        background: var(--panel);
+        border-left: 1px solid var(--border);
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+      }
+
+      .header {
+        padding: 14px 14px 10px 14px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.00));
+      }
+
+      .title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .subtitle {
+        margin: 6px 0 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .ux-banner {
+        margin: 10px 14px 0 14px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel2);
+        display: none;
+      }
+
+      .ux-banner.show {
+        display: block;
+      }
+
+      .ux-banner .primary {
+        font-size: 13px;
+        font-weight: 650;
+        margin: 0;
+      }
+
+      .ux-banner .secondary {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 6px 0 0 0;
+      }
+
+      .ux-banner.loading .primary { color: var(--accent); }
+      .ux-banner.stale .primary { color: var(--warn); }
+
+      .cards {
+        padding: 12px 14px 14px 14px;
+        overflow: auto;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.03);
+        border-radius: 12px;
+        padding: 10px;
+        margin-bottom: 10px;
+        cursor: pointer;
+      }
+
+      .card:hover { background: rgba(255,255,255,0.05); }
+
+      .card.selected {
+        outline: 2px solid rgba(94,234,212,0.55);
+        background: rgba(94,234,212,0.08);
+      }
+
+      .card h3 {
+        margin: 0 0 6px 0;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .card .meta {
+        font-size: 12px;
+        color: var(--muted);
+        line-height: 1.3;
+      }
+
+      .footer {
+        padding: 10px 14px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 11px;
+        background: rgba(255,255,255,0.02);
+      }
+
+      @media (max-width: 980px) {
+        .app {
+          grid-template-columns: 1fr;
+          grid-template-rows: 58vh 42vh;
+        }
+        #map { height: 58vh; }
+        .sidebar {
+          height: 42vh;
+          border-left: none;
+          border-top: 1px solid var(--border);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="app">
+      <div id="map"></div>
+
+      <div class="sidebar">
+        <div class="header">
+          <h1 class="title">CSA — Safety Dashboard</h1>
+          <p class="subtitle">Read-only visibility for situational awareness</p>
+
+          <div id="uxBanner" class="ux-banner" role="status" aria-live="polite">
+            <p id="uxPrimary" class="primary"></p>
+            <p id="uxSecondary" class="secondary"></p>
+          </div>
+        </div>
+
+        <div class="cards" id="cards"></div>
+
+        <div class="footer" id="footer">Status: Ready</div>
+      </div>
+    </div>
+
+    <script>
+      const DEV013_P1_STALE_THRESHOLD_HOURS = 24;
+
+      const DEFAULT_CENTER = [33.4484, -112.0740];
+      const DEFAULT_ZOOM = 11;
+
+      let map = null;
+      let clusterGroup = null;
+
+      const markerById = new Map();
+      const cardById = new Map();
+      let selectedId = null;
+
+      const uxBanner = document.getElementById("uxBanner");
+      const uxPrimary = document.getElementById("uxPrimary");
+      const uxSecondary = document.getElementById("uxSecondary");
+      const cardsEl = document.getElementById("cards");
+      const footerEl = document.getElementById("footer");
+
+      function initMap() {
+        map = L.map("map", { zoomControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors"
+        }).addTo(map);
+
+        clusterGroup = L.markerClusterGroup({
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+          disableClusteringAtZoom: 17
+        });
+
+        map.addLayer(clusterGroup);
+      }
+
+      function showBanner(kind, primaryText, secondaryText) {
+        uxBanner.classList.remove("loading", "stale");
+        uxBanner.classList.add("show");
+        if (kind) uxBanner.classList.add(kind);
+        uxPrimary.textContent = primaryText || "";
+        uxSecondary.textContent = secondaryText || "";
+      }
+
+      function hideBanner() {
+        uxBanner.classList.remove("show", "loading", "stale");
+        uxPrimary.textContent = "";
+        uxSecondary.textContent = "";
+      }
+
+      function setFooter(text) {
+        footerEl.textContent = text;
+      }
+
+      function toNumber(v) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function parseDateMaybe(v) {
+        if (!v) return null;
+        if (v instanceof Date && !isNaN(v.getTime())) return v;
+        const asNum = toNumber(v);
+        if (asNum !== null) {
+          const d = new Date(asNum);
+          return isNaN(d.getTime()) ? null : d;
+        }
+        const d = new Date(String(v));
+        return isNaN(d.getTime()) ? null : d;
+      }
+
+      function getRecordId(rec, index) {
+        return rec.id || rec.incident_id || rec.uid || rec.hash || rec.row_id || `rec_${index + 1}`;
+      }
+
+      function getLatLng(rec) {
+        const lat = toNumber(rec.lat ?? rec.latitude ?? rec.Lat ?? rec.Latitude);
+        const lng = toNumber(rec.lng ?? rec.lon ?? rec.long ?? rec.longitude ?? rec.Lng ?? rec.Longitude);
+        if (lat === null || lng === null) return null;
+        return [lat, lng];
+      }
+
+      function getTitle(rec) {
+        return rec.title || rec.incident_type || rec.type || rec.category || "Incident";
+      }
+
+      function getLocationLine(rec) {
+        return rec.location || rec.address || rec.city || rec.area || "";
+      }
+
+      function getTimestamp(rec) {
+        return (
+          parseDateMaybe(rec.timestamp) ||
+          parseDateMaybe(rec.time) ||
+          parseDateMaybe(rec.date) ||
+          parseDateMaybe(rec.datetime) ||
+          parseDateMaybe(rec.occurred_at) ||
+          parseDateMaybe(rec.published_at) ||
+          null
+        );
+      }
+
+      function formatDate(d) {
+        if (!d) return "";
+        try {
+          return d.toLocaleString(undefined, {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit"
+          });
+        } catch {
+          return String(d);
+        }
+      }
+
+      function clearUI() {
+        markerById.clear();
+        if (clusterGroup) clusterGroup.clearLayers();
+        cardById.clear();
+        cardsEl.innerHTML = "";
+        selectedId = null;
+      }
+
+      function selectIncident(id) {
+        if (!id) return;
+
+        if (selectedId && cardById.has(selectedId)) {
+          cardById.get(selectedId).classList.remove("selected");
+        }
+        selectedId = id;
+
+        if (cardById.has(id)) {
+          cardById.get(id).classList.add("selected");
+          cardById.get(id).scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+
+        const m = markerById.get(id);
+        if (m && map) {
+          if (clusterGroup && clusterGroup.zoomToShowLayer) {
+            clusterGroup.zoomToShowLayer(m, () => {
+              m.openPopup();
+              map.panTo(m.getLatLng(), { animate: true });
+            });
+          } else {
+            m.openPopup();
+            map.panTo(m.getLatLng(), { animate: true });
+          }
+        }
+      }
+
+      function addCard(rec, id) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.dataset.id = id;
+
+        const h3 = document.createElement("h3");
+        h3.textContent = getTitle(rec);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const lines = [];
+        const loc = getLocationLine(rec);
+        const ts = getTimestamp(rec);
+        if (loc) lines.push(loc);
+        if (ts) lines.push(formatDate(ts));
+        meta.textContent = lines.join(" • ") || "—";
+
+        card.appendChild(h3);
+        card.appendChild(meta);
+        card.addEventListener("click", () => selectIncident(id));
+
+        cardsEl.appendChild(card);
+        cardById.set(id, card);
+      }
+
+      function addMarker(rec, id) {
+        const latlng = getLatLng(rec);
+        if (!latlng || !clusterGroup) return;
+
+        const popupLines = [];
+        popupLines.push(`<strong>${getTitle(rec)}</strong>`);
+        const loc = getLocationLine(rec);
+        const ts = getTimestamp(rec);
+        if (loc) popupLines.push(loc);
+        if (ts) popupLines.push(formatDate(ts));
+
+        const marker = L.marker(latlng);
+        marker.bindPopup(popupLines.join("<br/>"));
+        marker.on("click", () => selectIncident(id));
+
+        clusterGroup.addLayer(marker);
+        markerById.set(id, marker);
+      }
+
+      function normalizePayload(payload) {
+        if (Array.isArray(payload)) return payload;
+        if (payload && typeof payload === "object") {
+          if (Array.isArray(payload.data)) return payload.data;
+          if (Array.isArray(payload.records)) return payload.records;
+          if (Array.isArray(payload.incidents)) return payload.incidents;
+          if (Array.isArray(payload.items)) return payload.items;
+        }
+        return [];
+      }
+
+      function loadIncidents() {
+        showBanner("loading", "Loading current safety information…", "Please wait a moment.");
+        setFooter("Status: Loading…");
+
+        google.script.run
+          .withSuccessHandler(onIncidentsLoaded)
+          .withFailureHandler(onIncidentsFailed)
+          .CSA_WebApp_GetIncidentData();
+      }
+
+      function onIncidentsLoaded(payload) {
+        const records = normalizePayload(payload);
+        clearUI();
+
+        if (!records || records.length === 0) {
+          showBanner(null, "No safety incidents are currently reported in this area.", "This does not indicate an error.");
+          setFooter("Status: No incidents returned");
+          return;
+        }
+
+        records.forEach((rec, idx) => {
+          const id = getRecordId(rec, idx);
+          addMarker(rec, id);
+          addCard(rec, id);
+        });
+
+        try {
+          if (clusterGroup && clusterGroup.getLayers().length > 0) {
+            const bounds = clusterGroup.getBounds();
+            if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
+          }
+        } catch {}
+
+        const newest = records.map(getTimestamp).filter(Boolean).sort((a,b)=>b-a)[0];
+        if (newest) {
+          const ageHours = Math.abs(new Date() - newest) / 36e5;
+          if (ageHours > DEV013_P1_STALE_THRESHOLD_HOURS) {
+            showBanner("stale", "Displayed information may be out of date.", "The system is currently in read-only mode.");
+            setFooter(`Status: Loaded (${records.length}) — Data may be stale`);
+          } else {
+            hideBanner();
+            setFooter(`Status: Loaded (${records.length})`);
+          }
+        } else {
+          hideBanner();
+          setFooter(`Status: Loaded (${records.length})`);
+        }
+      }
+
+      function onIncidentsFailed(err) {
+        clearUI();
+        showBanner(null, "Unable to load safety information at this time.", "Please try again later.");
+        setFooter("Status: Load failed");
+        try { console.error(err); } catch {}
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        initMap();
+        loadIncidents();
+      });
+    </script>
+  </body>
+</html>
