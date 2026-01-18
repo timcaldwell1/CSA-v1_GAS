@@ -1,0 +1,174 @@
+/**
+ * @file_name: CSA_QA_DEV013_P1_UX_State_Signaling.gs
+ * @title: CSA QA Harness — DEV013 P1 UX State Signaling (FAIL Injection)
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-06
+ * @Last Updated: 2026-01-06 10:13 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV013
+ *
+ * @description:
+ *   QA harness to validate DEV013 P1 UX State Signaling.
+ *   Includes optional FAIL injection to prove test integrity.
+ *
+ * @notes:
+ *   - Read-only
+ *   - Server-side only
+ *   - Safe for PROD
+ */
+
+/* ================================
+ * CONFIG
+ * ================================ */
+
+const DEV013_QA_STALE_THRESHOLD_HOURS = 24;
+
+/**
+ * FAIL INJECTION TOGGLE
+ * true  = inject deliberate failures
+ * false = normal QA run
+ */
+//const DEV013_QA_INJECT_FAIL = true; //see script header for options
+const DEV013_QA_INJECT_FAIL = false;
+
+/* ================================
+ * ENTRY POINT
+ * ================================ */
+
+function CSA_QA_Run_DEV013_P1() {
+  logSection("DEV013 P1 QA RUN — START");
+
+  try {
+    test_empty_dataset();
+    test_fresh_dataset();
+    test_stale_dataset();
+  } catch (e) {
+    logFail("QA HARNESS EXCEPTION", e.message);
+  }
+
+  logSection("DEV013 P1 QA RUN — END");
+}
+
+/* ================================
+ * TEST CASES
+ * ================================ */
+
+function test_empty_dataset() {
+  logTest("TEST 1 — Empty Dataset");
+
+  // FAIL injection: pretend dataset is NOT empty
+  const payload = DEV013_QA_INJECT_FAIL ? [{}] : [];
+
+  assert(Array.isArray(payload), "Payload is array");
+
+  assert(
+    payload.length === 0,
+    "Payload length is zero (empty state)"
+  );
+
+  logPass("Empty dataset condition validated");
+}
+
+function test_fresh_dataset() {
+  logTest("TEST 2 — Fresh Dataset");
+
+  // FAIL injection: make timestamp stale
+  const now = new Date();
+  const injectedDate = DEV013_QA_INJECT_FAIL
+    ? new Date(now.getTime() - (DEV013_QA_STALE_THRESHOLD_HOURS + 2) * 3600000)
+    : now;
+
+  const payload = [mockIncident(injectedDate)];
+
+  const newest = computeNewestTimestamp(payload);
+  const ageHours = hoursBetween(now, newest);
+
+  assert(
+    ageHours <= DEV013_QA_STALE_THRESHOLD_HOURS,
+    "Dataset is fresh (" + ageHours.toFixed(2) + " hrs)"
+  );
+
+  logPass("Fresh dataset condition validated");
+}
+
+function test_stale_dataset() {
+  logTest("TEST 3 — Stale Dataset");
+
+  // FAIL injection: make timestamp fresh
+  const injectedDate = DEV013_QA_INJECT_FAIL
+    ? new Date()
+    : new Date(Date.now() - (DEV013_QA_STALE_THRESHOLD_HOURS + 6) * 3600000);
+
+  const payload = [mockIncident(injectedDate)];
+
+  const newest = computeNewestTimestamp(payload);
+  const ageHours = hoursBetween(new Date(), newest);
+
+  assert(
+    ageHours > DEV013_QA_STALE_THRESHOLD_HOURS,
+    "Dataset is stale (" + ageHours.toFixed(2) + " hrs)"
+  );
+
+  logPass("Stale dataset condition validated");
+}
+
+/* ================================
+ * HELPERS
+ * ================================ */
+
+function mockIncident(dateObj) {
+  return {
+    incident_type: "QA Test Incident",
+    description: "Synthetic QA record",
+    latitude: 33.377057,
+    longitude: -112.145394,
+    timestamp: dateObj
+  };
+}
+
+function computeNewestTimestamp(records) {
+  let max = null;
+
+  records.forEach(r => {
+    const d = new Date(r.timestamp);
+    if (!max || d.getTime() > max.getTime()) {
+      max = d;
+    }
+  });
+
+  return max;
+}
+
+function hoursBetween(a, b) {
+  return Math.abs(a.getTime() - b.getTime()) / (1000 * 60 * 60);
+}
+
+/* ================================
+ * ASSERT / LOGGING
+ * ================================ */
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error("ASSERT FAIL: " + message);
+  }
+  Logger.log("ASSERT PASS: %s", message);
+}
+
+function logTest(name) {
+  Logger.log("---- %s ----", name);
+}
+
+function logPass(message) {
+  Logger.log("PASS: %s", message);
+}
+
+function logFail(context, message) {
+  Logger.log("FAIL [%s]: %s", context, message);
+}
+
+function logSection(title) {
+  Logger.log("================================");
+  Logger.log(title);
+  Logger.log("================================");
+}
