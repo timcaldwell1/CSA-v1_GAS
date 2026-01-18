@@ -23,10 +23,8 @@ source code for the CSA (Church Safety Alerts) project.
 
 ## Snapshot structure
 /backups/gas/YYYY/MM/DD/
-└── CSA_GAS_BACKUP_YYYYMMDD_HHMMSS/
-├── *.gs
-├── *.html
-└── appsscript.json
+CSA_GAS_BACKUP_YYYYMMDD_HHMMSS/
+
 
 Each folder represents a complete, immutable snapshot at that moment in time.
 
