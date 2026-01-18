@@ -1,0 +1,30 @@
+/**
+ * @file_name: csa_DEV021_restore_core_properties_TEMP.gs
+ * @title: CSA DEV021 — Restore Core Script Properties (TEMP)
+ * @product: Church Safety Alerts (CSA)
+ * @version: v0.1.0
+ * @date_time: 2026-01-15 08:53 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV021
+ *
+ * TEMP FILE NOTICE:
+ * - One-time recovery utility.
+ * - Candidate for deletion during GAS hygiene.
+ */
+
+function csa_DEV021_RestoreCoreScriptProperties_TEMP_() {
+  const props = PropertiesService.getScriptProperties();
+
+  const REQUIRED_CORE_PROPERTIES = {
+    CSA_PRODUCT_NAME: 'Church Safety Alerts',
+    CSA_PRODUCT_CODE: 'CSA',
+    CSA_PRODUCT_VERSION: 'v1.0.0',
+    CSA_ENV: 'DEV',
+    CSA_SHEET_PREFIX: 'test4_'
+  };
+
+  props.setProperties(REQUIRED_CORE_PROPERTIES, false);
+
+  Logger.log('DEV021: Core CSA Script Properties restored.');
+}
