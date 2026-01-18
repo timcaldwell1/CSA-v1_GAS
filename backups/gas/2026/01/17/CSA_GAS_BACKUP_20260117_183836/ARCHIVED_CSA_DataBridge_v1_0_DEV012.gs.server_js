@@ -1,0 +1,154 @@
+/**
+ 
+ * @file_name: CSA_DataBridge_v1_0.gs
+ * @title: CSA v1.0.1 Data Bridge (DEV012 Mock-Aware)
+ * @version: v1.0.1
+ * @Org_date_time: 2025-12-20 12:25 MST
+ * @Last Updated: 2026-01-05 13:12 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV008,
+ *   ChatGPT, DEV012
+ */
+
+/**
+ * ====================================================
+ * ARCHIVED — DO NOT USE
+ *
+ * This file represents the DEV012-era DataBridge.
+ * Superseded by CSA_DataBridge_v1_2.gs.
+ * Retained for historical reference only.
+ *
+ * Original version: v1.0.1 (DEV012)
+ * Archived on: 2026-01-14
+ *=====================================================
+ * @description:
+ *   Read-only data bridge for CSA.
+ *   DEV012 adds optional Mock Mode for DEV/QA validation.
+ *
+ * @notes:
+ *   - Read-only access
+ *   - Sheet remains authoritative when mock mode disabled
+ *   - No schema changes
+ *   - No side effects
+ */
+
+/**
+ * Canonical incident data entry point.
+ * DEV012: supports CSA_MOCK_MODE toggle.
+ */
+Logger.log('DEV012 DATA: CSA_GetIncidentData_ ENTERED');
+
+function CSA_GetIncidentData_() {
+  const cfg = CSA_GetConfig_();
+  const props = PropertiesService.getScriptProperties();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE')).toUpperCase();
+
+  if (mockMode === 'TRUE') {
+    Logger.log('CSA DEV012: Mock Mode ENABLED');
+    const mockIncidents = CSA_DEV012_GenerateMockIncidents_(cfg);
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: mockIncidents.length,
+      incidents: mockIncidents,
+      source: 'MOCK'
+    };
+  }
+
+  Logger.log('CSA DEV012: Mock Mode DISABLED — using sheet');
+
+  const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+  const sheet = ss.getSheetByName('test3_incident_data');
+
+  if (!sheet) {
+    throw new Error('test3_incident_data sheet not found.');
+  }
+
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+
+  if (values.length < 2) {
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: 0,
+      incidents: [],
+      source: 'SHEET'
+    };
+  }
+
+  const headers = values.shift();
+  const idx = indexHeaders_(headers);
+
+  const incidents = [];
+
+  values.forEach(row => {
+    const incident = {
+      id_a: row[0],
+      id_b: row[1],
+      incident_type: safeValue_(row[idx.incident_type]),
+      description: safeValue_(row[idx.description]),
+      latitude: row[idx.lat],
+      longitude: row[idx.lng],
+      campus: cfg.CSA_CAMPUS_NAME,
+      timestamp: new Date().toLocaleString('en-US', {
+        timeZone: 'America/Phoenix'
+      })
+    };
+
+    incidents.push(incident);
+  });
+
+  return {
+    campus: cfg.CSA_CAMPUS_NAME,
+    count: incidents.length,
+    incidents: incidents,
+    source: 'SHEET'
+  };
+}
+
+/**
+ * DEV012 — Synthetic incident generator
+ * Produces dense spatial data to force clustering.
+ */
+function CSA_DEV012_GenerateMockIncidents_(cfg) {
+  const baseLat = 33.45;
+  const baseLng = -112.07;
+  const incidents = [];
+
+  for (let i = 0; i < 25; i++) {
+    incidents.push({
+      id_a: 'MOCK-' + (i + 1),
+      id_b: '',
+      incident_type: 'Mock Incident',
+      description: 'DEV012 Synthetic Incident #' + (i + 1),
+      latitude: baseLat + (Math.random() * 0.01),
+      longitude: baseLng + (Math.random() * 0.01),
+      campus: cfg.CSA_CAMPUS_NAME,
+      timestamp: new Date(Date.now() - i * 3600000).toLocaleString('en-US', {
+        timeZone: 'America/Phoenix'
+      })
+    });
+  }
+
+  return incidents;
+}
+
+/**
+ * Header index helper
+ */
+function indexHeaders_(headers) {
+  return {
+    incident_type: headers.indexOf('incident_type'),
+    description: headers.indexOf('description'),
+    lat: headers.findIndex(h => String(h).toLowerCase().includes('lat')),
+    lng: headers.findIndex(h => String(h).toLowerCase().includes('lon'))
+  };
+}
+
+/**
+ * Safe value guard
+ */
+function safeValue_(value) {
+  return value === undefined || value === null ? '' : value;
+}
