@@ -1,0 +1,128 @@
+/**
+ * @file_name: CSA_Router_v1_1.gs
+ * @title: CSA Router — Mock vs PROD Hard Gating (DEV016)
+ * @version: v1.1.0
+ * @Org_date_time: 2025-12-20 12:24 MST
+ * @Last Updated: 2026-01-10 11:22 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV014
+ *   ChatGPT, DEV016
+ *
+ * @description:
+ *   Single authoritative runtime gate for CSA WebApp execution.
+ *
+ *   DEV016 OBJECTIVE:
+ *   Eliminate the DEV014 failure class by making mock / QA execution
+ *   structurally unreachable from PROD, regardless of flags, config
+ *   mistakes, or human error.
+ *
+ * ARCHITECTURAL RULES (NON-NEGOTIABLE):
+ *   - ALL environment decisions occur HERE and ONLY HERE.
+ *   - CSA_Config_* is read-only and provides inputs, not decisions.
+ *   - CSA_OBI_* is installation-time only and is NOT consulted here.
+ *   - PROD safety overrides convenience.
+ *   - Fail fast. No silent fallback. No guessing.
+ *
+ * NOTES:
+ *   - This file is intentionally verbose during DEV016 QA.
+ *   - Comments will be trimmed prior to DEV016 freeze.
+ *   - No observability or logging dependency exists here.
+ */
+
+/**
+ * Authoritative router entry point.
+ * This function is the ONLY runtime gate for WebApp execution.
+ *
+ * @param {Object} e - Apps Script WebApp event object
+ * @returns {HtmlOutput|TextOutput}
+ */
+function CSA_Route_(e) {
+
+  // Normalize request parameter early.
+  // Missing or malformed parameters are expected in real-world usage.
+  const mode = (e && e.parameter && e.parameter.mode)
+    ? String(e.parameter.mode).trim()
+    : null;
+
+  let cfg;
+
+  try {
+    // Fetch configuration.
+    // IMPORTANT: CSA_GetConfig_() MUST NOT make decisions.
+    cfg = CSA_GetConfig_();
+
+    // Normalize environment value for strict comparison.
+    const env = String(cfg.CSA_ENV || '').trim().toUpperCase();
+
+    // ============================================================
+    // FAIL FAST — ENV VALIDATION
+    // ============================================================
+    // We do NOT attempt to recover from invalid configuration.
+    // Unsafe configuration must halt execution immediately.
+    if (env !== 'PROD' && env !== 'QA') {
+      throw new Error(
+        'FATAL: Invalid CSA_ENV. Expected PROD or QA. Received: ' + env
+      );
+    }
+
+    // ============================================================
+    // ROUTE ALLOWLIST
+    // ============================================================
+    // Explicit allowlist per environment.
+    // Anything not listed is forbidden.
+    const allowlist = {
+      PROD: [null, 'data'],
+      QA:   [null, 'data'] // QA expansion requires explicit future decision
+    };
+
+    const allowedModes = allowlist[env];
+    const isAllowed = allowedModes.indexOf(mode) !== -1;
+
+    if (!isAllowed) {
+      throw new Error(
+        'FATAL: Route blocked by Router. ENV=' + env + ', mode=' + mode
+      );
+    }
+
+    // ============================================================
+    // DISPATCH
+    // ============================================================
+    // Only PROD-safe surfaces exist in this call graph.
+    // No mock or QA code is reachable from here.
+    if (mode === 'data') {
+      const payload = CSA_GetIncidentData_();
+
+      return ContentService
+        .createTextOutput(JSON.stringify(payload))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Default UI path (no mode)
+    return HtmlService
+      .createHtmlOutputFromFile('CSA_AppShell')
+      .setTitle('Church Safety Alerts');
+
+  } catch (err) {
+    // ============================================================
+    // FAIL FAST RESPONSE
+    // ============================================================
+    // Errors are deterministic and explicit.
+    const msg = (err && err.message)
+      ? err.message
+      : 'Unknown router error';
+
+    if (mode === 'data') {
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          error: true,
+          message: msg
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return HtmlService.createHtmlOutput(
+      '<h3>CSA Error</h3><p>' + msg + '</p>'
+    );
+  }
+}
