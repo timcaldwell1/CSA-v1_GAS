@@ -1,0 +1,140 @@
+/**
+ * @file_name: CSA_System_Status_Snapshot_DEV016.gs
+ * @title: CSA System Status Snapshot (Pre-Handoff)
+ * @version: v1.0.0
+ * @env: CSA
+ * @last_updated: 2026-01-11 07:36 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV016
+ *
+ * @description:
+ *   Produces a full, read-only snapshot of the current CSA runtime state
+ *   for binder evidence and DEV handoff. Logs ONLY. No writes to Sheets.
+ *
+ * @guarantees:
+ *   - Read-only (Script Properties read only)
+ *   - No Drive access
+ *   - No Apps Script API usage
+ *   - Safe in PROD
+ *
+ * @usage:
+ *   Run CSA_StatusSnapshot_Run_() once per handoff.
+ *   Capture execution logs verbatim into binder.
+ */
+
+/**
+ * Entry point for system status snapshot.
+ */
+function CSA_StatusSnapshot_Run_() {
+  const now = new Date();
+
+  Logger.log('===== CSA SYSTEM STATUS SNAPSHOT =====');
+  Logger.log('Timestamp (MST): %s', formatMST_(now));
+  Logger.log('Effective User: %s', Session.getEffectiveUser().getEmail());
+
+  logProjectIdentity_();
+  logBindingStatus_();
+  logDeploymentContext_();
+  logScriptProperties_();
+  logRouterSanity_();
+
+  Logger.log('===== END CSA SYSTEM STATUS SNAPSHOT =====');
+}
+
+/* ------------------------------------------------------------------ */
+/* Identity & Binding                                                  */
+/* ------------------------------------------------------------------ */
+
+function logProjectIdentity_() {
+  Logger.log('---- Project Identity ----');
+  Logger.log('Runtime Script ID: %s', ScriptApp.getScriptId());
+}
+
+function logBindingStatus_() {
+  Logger.log('---- Binding Status ----');
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log('Binding: CONTAINER-BOUND (Spreadsheet)');
+    Logger.log('Spreadsheet Name: %s', ss.getName());
+    Logger.log('Spreadsheet ID: %s', ss.getId());
+  } catch (e) {
+    Logger.log('Binding: NOT container-bound (no active spreadsheet)');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Deployment Context                                                  */
+/* ------------------------------------------------------------------ */
+
+function logDeploymentContext_() {
+  Logger.log('---- Deployment Context ----');
+  Logger.log('Execution Environment: %s', detectEnv_());
+  Logger.log('Trigger Type: %s', detectTriggerType_());
+}
+
+/* ------------------------------------------------------------------ */
+/* Script Properties                                                   */
+/* ------------------------------------------------------------------ */
+
+function logScriptProperties_() {
+  Logger.log('---- Script Properties (Selected) ----');
+  const keys = [
+    'CSA_PRODUCT_NAME',
+    'CSA_ENV',
+    'CSA_MOCK_MODE',
+    'CSA_CAMPUS_NAME',
+    'CSA_CAMPUS_ID',
+    'CSA_SPREADSHEET_ID',
+    'CSA_PROJECT_ID',
+    'CSA_INSTALL_VERSION',
+    'CSA_INSTALL_STATUS',
+    'CSA_INSTALL_TIMESTAMP',
+    'CSA_LAYER1_MM',
+    'CSA_BACKUP_FOLDER_ID'
+  ];
+
+  const props = PropertiesService.getScriptProperties();
+  keys.forEach(function (key) {
+    const val = props.getProperty(key);
+    Logger.log('%s = %s', key, val !== null ? val : '(not set)');
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Router Sanity                                                       */
+/* ------------------------------------------------------------------ */
+
+function logRouterSanity_() {
+  Logger.log('---- Router Sanity ----');
+  const exists = (typeof CSA_Route_ === 'function');
+  Logger.log('CSA_Route_ exists: %s', exists ? 'YES' : 'NO');
+
+  if (exists) {
+    Logger.log('Router reference check: PASS (function present)');
+  } else {
+    Logger.log('Router reference check: FAIL (function missing)');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+function detectEnv_() {
+  try {
+    // GAS does not expose deployment type directly; this is informational
+    return 'WebApp / Editor (indeterminate at runtime)';
+  } catch (e) {
+    return 'Unknown';
+  }
+}
+
+function detectTriggerType_() {
+  // No trigger context introspection available safely
+  return 'Manual / WebApp / Trigger (not explicitly detectable)';
+}
+
+function formatMST_(date) {
+  return Utilities.formatDate(date, 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss');
+}
