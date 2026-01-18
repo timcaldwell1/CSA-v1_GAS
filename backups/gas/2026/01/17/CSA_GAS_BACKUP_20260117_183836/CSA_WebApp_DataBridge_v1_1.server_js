@@ -1,0 +1,38 @@
+/**
+ * @file_name: CSA_WebApp_DataBridge_v1_1.gs
+ * @title: CSA WebApp Data Bridge (DEV012 Instrumented)
+ * @version: v1.1.1
+ * @Org_date_time: 2026-01-05
+ * @Last Updated: 2026-01-05 13:32 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV011,
+ *   ChatGPT, DEV012
+ *
+ * @description:
+ *   HtmlService-facing data bridge.
+ *   DEV012 adds hard instrumentation to prove execution path.
+ *
+ * @notes:
+ *   - Read-only
+ *   - No caching
+ *   - No logic bypass
+ */
+
+function CSA_WebApp_GetIncidentData() {
+  Logger.log('DEV012 BRIDGE: CSA_WebApp_GetIncidentData() ENTERED');
+
+  if (typeof CSA_GetIncidentData_ !== 'function') {
+    Logger.log('DEV012 BRIDGE ERROR: CSA_GetIncidentData_ is NOT defined');
+    throw new Error('CSA_GetIncidentData_ not found');
+  }
+
+  const result = CSA_GetIncidentData_();
+
+  Logger.log(
+    'DEV012 BRIDGE: CSA_GetIncidentData_ returned ' +
+    (result && result.incidents ? result.incidents.length : 'NO DATA')
+  );
+
+  return result;
+}
