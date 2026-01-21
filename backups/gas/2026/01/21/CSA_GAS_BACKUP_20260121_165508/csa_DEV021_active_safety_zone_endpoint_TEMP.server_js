@@ -1,0 +1,139 @@
+/**
+ * Title: CSA v1 — DEV021 Active Safety Zone Endpoint (TEMP)
+ * Product: Church Safety Alerts (CSA)
+ * Version: v0.1.0
+ * Binder Type: Technical / Product Binder
+ * Current Phase: DEV021 — WebApp Map Enhancements (Leaflet Markers)
+ * Thread Lineage: DEV020 → DEV021
+ * Create Date: 2026-01-15 09:34 MST
+ * Last Updated: 2026-01-15 09:34 MST
+ * Authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV021
+ *
+ * TEMP FILE NOTICE:
+ * - This file is temporary / one-off.
+ * - Candidate for deletion during GAS hygiene.
+ * - Do not treat as production module unless promoted by decision log entry.
+ *
+ * PURPOSE:
+ * - Provide a stable server endpoint for the WebApp to fetch the single ACTIVE safety zone.
+ *
+ * CONTRACT:
+ * - Reads from sheet: `${CSA_SHEET_PREFIX}safety_zones` (default: test4_safety_zones)
+ * - Returns:
+ *   {
+ *     zone_name: string,
+ *     center_lat: number,
+ *     center_lng: number,
+ *     radius_m: number,
+ *     active: boolean
+ *   }
+ */
+
+function CSA_GetActiveSafetyZone_() {
+  const props = PropertiesService.getScriptProperties();
+  const prefix = (props.getProperty('CSA_SHEET_PREFIX') || 'test4_').trim();
+  const sheetName = `${prefix}safety_zones`;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error(`Missing required sheet: ${sheetName}`);
+
+  const values = sh.getDataRange().getValues();
+  if (!values || values.length < 2) return null; // no rows
+
+  const headers = values[0].map(h => String(h || '').trim());
+  const idx = _csa_DEV021_IndexHeaders_(headers);
+
+  // Scan rows for active=true (first match wins; single-zone scope)
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+
+    const active = _csa_DEV021_ToBool_(row[idx.active]);
+    if (!active) continue;
+
+    const zoneName = String(row[idx.zone_name] || '').trim() || 'Campus';
+    const lat = _csa_DEV021_ToNumber_(row[idx.center_lat]);
+    const lng = _csa_DEV021_ToNumber_(row[idx.center_lng]);
+    const radiusM = _csa_DEV021_ToNumber_(row[idx.radius_m]);
+
+    if (!_csa_DEV021_IsValidLatLng_(lat, lng)) {
+      throw new Error(`Invalid campus geo in ${sheetName} row ${r + 1}: lat=${lat}, lng=${lng}`);
+    }
+    if (!isFinite(radiusM) || radiusM <= 0) {
+      // Radius not required for marker-only step, but we return it if present.
+      // Keep deterministic; default to 1609 (1 mile) if blank/invalid.
+      // You can change this default later if desired.
+      // NOTE: Radius is authoritative in meters.
+      // eslint-disable-next-line no-var
+      var safeRadius = 1609;
+      return { zone_name: zoneName, center_lat: lat, center_lng: lng, radius_m: safeRadius, active: true };
+    }
+
+    return { zone_name: zoneName, center_lat: lat, center_lng: lng, radius_m: radiusM, active: true };
+  }
+
+  // No active zone found
+  return null;
+}
+
+function _csa_DEV021_IndexHeaders_(headers) {
+  // Expected columns (per your sheet):
+  // A: zone_name
+  // B: center_lat
+  // C: center_lng
+  // D: radius
+  // E: active
+  //
+  // We support either exact names or known variants.
+  const norm = headers.map(h => h.toLowerCase());
+
+  const findAny = (candidates) => {
+    for (const c of candidates) {
+      const i = norm.indexOf(c);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+
+  const zoneName = findAny(['zone_name', 'name', 'campus_name', 'zone']);
+  const centerLat = findAny(['center_lat', 'lat', 'latitude']);
+  const centerLng = findAny(['center_lng', 'lng', 'lon', 'longitude', 'center_lon', 'center_long']);
+  const radiusM  = findAny(['radius', 'radius_m', 'radius_meters', 'radius_in_meters']);
+  const active   = findAny(['active', 'is_active', 'live']);
+
+  // If headers are missing, fall back to fixed column positions (A–E).
+  // This keeps DEV/QA flowing even if header row got edited.
+  return {
+    zone_name: zoneName >= 0 ? zoneName : 0,
+    center_lat: centerLat >= 0 ? centerLat : 1,
+    center_lng: centerLng >= 0 ? centerLng : 2,
+    radius_m: radiusM >= 0 ? radiusM : 3,
+    active: active >= 0 ? active : 4
+  };
+}
+
+function _csa_DEV021_ToBool_(v) {
+  if (typeof v === 'boolean') return v;
+  const s = String(v || '').trim().toLowerCase();
+  return s === 'true' || s === 'yes' || s === 'y' || s === '1';
+}
+
+function _csa_DEV021_ToNumber_(v) {
+  if (typeof v === 'number') return v;
+  const n = Number(String(v || '').trim());
+  return n;
+}
+
+function _csa_DEV021_IsValidLatLng_(lat, lng) {
+  return isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+/**
+ * PUBLIC WebApp endpoint
+ * Required for google.script.run
+ * Thin wrapper by design
+ */
+function CSA_GetActiveSafetyZone() {
+  return CSA_GetActiveSafetyZone_();
+}
