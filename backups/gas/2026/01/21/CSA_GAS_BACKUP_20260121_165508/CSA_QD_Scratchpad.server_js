@@ -1,0 +1,95 @@
+////function myFunction() {
+/*  
+//}
+function CSA_QD_E2E_Server_Test() {
+  //const url = ScriptApp.getService().getUrl();
+  const url = 'https://script.google.com/macros/s/AKfycbzrFzMlbYl2zSlu-Cp2a0rcqP-vEBT5xDC7iziaE4lbli2kHnBtW_QxU_j23O1J2hvN/exec';
+
+  Logger.log('Calling WebApp URL: ' + url);
+
+  const res = UrlFetchApp.fetch(url, {
+    muteHttpExceptions: true
+  });
+
+  Logger.log('HTTP status: ' + res.getResponseCode());
+  Logger.log('Response body: ' + res.getContentText());
+}
+
+fetch(WEBAPP_URL)
+  .then(r => {
+    console.log('HTTP status:', r.status);
+    return r.text();
+  })
+  .then(t => {
+    console.log('RAW RESPONSE:', t);
+    return JSON.parse(t);
+  })
+  .then(j => {
+    console.log('PARSED JSON:', j);
+    // existing render logic
+  })
+  .catch(err => {
+    console.error('FETCH ERROR:', err);
+  });
+*/
+
+/** 
+ * CSA_Force_Project_History_Update
+ * What it does: Writes a timestamp to 
+ * Script Properties → counts as a project
+ * change → creates a new Project History 
+ * entry without affecting runtime behavior
+ */
+
+/**
+ * @file_name: CSA_Force_Project_History_Update.gs
+ * @purpose: Force a new GAS Project History entry via safe no-op
+ * @thread: DEV016
+ */
+
+function CSA_Force_Project_History_Update() {
+  const props = PropertiesService.getScriptProperties();
+  const ts = new Date().toISOString();
+
+  props.setProperty('CSA_HISTORY_TOUCH', ts);
+
+  Logger.log('GAS Project History updated at: ' + ts);
+}
+
+/** */
+/**
+ * CSA_QD_Scratchpad.gs
+ * @function Scratchpad
+ * @description Outputs all current Script Properties to the GAS Log.
+ * Safe to run anytime. No write operations.
+ * @version v1.0.0
+ */
+function listScriptProperties() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  Logger.log('==== Script Properties Dump ====');
+
+  if (!props || Object.keys(props).length === 0) {
+    Logger.log('No script properties set.');
+    return;
+  }
+
+  Object.keys(props).forEach(function (key) {
+    Logger.log(key + ' = ' + props[key]);
+  });
+}
+
+/**
+ * Lists all functions across all script files using reflection.
+ * Bulletproof, no APIs, no Drive, no fetch. DEV005
+ * Came from CCSA_GPT_2.0
+ */
+
+function csa_list_all_functions() {
+  const global = this;
+  const names = Object.keys(global)
+    .filter(k => typeof global[k] === "function")
+    .sort();
+
+  Logger.log(JSON.stringify(names, null, 2));
+  return names;
+}
