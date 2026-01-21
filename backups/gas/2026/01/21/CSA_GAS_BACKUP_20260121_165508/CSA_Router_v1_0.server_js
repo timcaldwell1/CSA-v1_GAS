@@ -1,0 +1,65 @@
+/**
+ * @file_name: CSA_Router_v1_2_DEV026.gs
+ * @title: CSA Router — Guard Enforcement + Safe Logging
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.2.0
+ * @binder: Technical / Product Binder
+ * @phase: DEV026 — Active
+ * @thread: DEV022 → DEV023 → DEV026
+ * @created: 2026-01-18 20:46 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV026)
+ *
+ * PURPOSE
+ * -------
+ * Central runtime router for CSA WebApp.
+ * Enforces environment safety and routes requests.
+ *
+ * GUARANTEES
+ * ----------
+ * - Router execution is NEVER blocked by logging
+ */
+
+function CSA_Route_(e) {
+
+  var context = {};
+  var mode = e && e.parameter ? e.parameter.mode : null;
+  var routeName = e && e.parameter ? e.parameter.route : null;
+
+  var guardFailure =
+    (typeof CSA_ENV === 'undefined') ||
+    (CSA_ENV === 'PROD' &&
+     typeof CSA_MOCK_MODE !== 'undefined' &&
+     CSA_MOCK_MODE === true);
+
+  if (guardFailure) {
+
+    try {
+      if (!context._routerGuardLogged &&
+          typeof CSA_LogError_ === 'function') {
+
+        context._routerGuardLogged = true;
+
+        CSA_LogError_({
+          error: 'RouterGuardFailure',
+          severity: 'ERROR',
+          source: 'Router',
+          function_name: 'CSA_Route_',
+          message: 'Router guard blocked execution due to invalid runtime state',
+          error_details: JSON.stringify({
+            CSA_ENV: (typeof CSA_ENV !== 'undefined') ? CSA_ENV : 'UNKNOWN',
+            CSA_MOCK_MODE: (typeof CSA_MOCK_MODE !== 'undefined') ? CSA_MOCK_MODE : 'UNKNOWN',
+            route: routeName,
+            mode: mode,
+            sheet_prefix: CSA_SHEET_PREFIX || 'test3_'
+          })
+        });
+      }
+    } catch (ignore) {}
+
+    return HtmlService.createHtmlOutput('Blocked by router guard');
+  }
+
+  return HtmlService.createHtmlOutputFromFile('CSA_AppShell');
+}
