@@ -1,0 +1,117 @@
+/**
+ * @file_name: CSA_ErrorLogger_v1_1.gs
+ * @project_name: CSA-v1
+ * @scope: DEV020-C Logging Hardening Patch
+ * @version: v1.1.0
+ * @date_time_mst: 2026-01-14 11:22 MST
+ *
+ * CRITICAL GUARANTEES (NON-NEGOTIABLE):
+ * 1. Logging NEVER writes to active sheet
+ * 2. Logging NEVER writes to row 1
+ * 3. Logging NEVER guesses a sheet
+ * 4. Unknown target => FAIL CLOSED (GAS log only)
+ *
+ * TARGET BINDING:
+ * - DEV020-C tests   → test4_error_log
+ * - Runtime logging  → test3_error_log
+ *
+ * This patch permanently prevents contamination of
+ * incident, audit, or config sheets.
+ */
+
+'use strict';
+
+/**
+ * Primary logging entry point.
+ */
+function CSA_LogEvent_(evt) {
+  try {
+    if (!evt || typeof evt !== 'object') {
+      Logger.log('[CSA_LOG][DROP] Invalid event object');
+      return;
+    }
+
+    const ss = SpreadsheetApp.getActive();
+    if (!ss) {
+      Logger.log('[CSA_LOG][DROP] No active spreadsheet');
+      return;
+    }
+
+    const targetSheetName = CSA_DetermineLogTarget_();
+    if (!targetSheetName) {
+      Logger.log('[CSA_LOG][DROP] No valid log target resolved');
+      return;
+    }
+
+    const sheet = ss.getSheetByName(targetSheetName);
+    if (!sheet) {
+      Logger.log('[CSA_LOG][DROP] Target sheet missing: ' + targetSheetName);
+      return;
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 1) {
+      Logger.log('[CSA_LOG][DROP] Invalid sheet state (no header row)');
+      return;
+    }
+
+    const row = [
+      Utilities.getUuid(),                        // id
+      new Date().toISOString(),                   // timestamp (UTC ISO-8601)
+      buildErrorField_(evt),                      // error
+      evt.incident_id || '',                      // incident_id
+      evt.details || '',                          // details
+      evt.error_details || '',                    // error_details
+      evt.campus_attempted || '',                 // campus_attempted
+      evt.original_ts || ''                       // original_ts
+    ];
+
+    // 🚧 HEADER PROTECTION — ALWAYS append AFTER last row
+    sheet.getRange(lastRow + 1, 1, 1, row.length).setValues([row]);
+
+  } catch (err) {
+    // FINAL FAIL-CLOSED GUARANTEE
+    Logger.log('[CSA_LOG][FAIL_CLOSED] ' + (err.message || err));
+  }
+}
+
+/**
+ * Exception helper (wraps CSA_LogEvent_)
+ */
+function CSA_LogException_(err, context) {
+  try {
+    CSA_LogEvent_(Object.assign({}, context, {
+      error_details: err && err.stack ? err.stack : String(err)
+    }));
+  } catch (_) {
+    Logger.log('[CSA_LOG][EXCEPTION_DROP]');
+  }
+}
+
+/**
+ * Determines correct logging target.
+ */
+function CSA_DetermineLogTarget_() {
+  try {
+    // DEV020-C automated tests always set RUN ID
+    if (typeof CSA_TEST_RUN_ID === 'string' && CSA_TEST_RUN_ID.indexOf('DEV020-C') === 0) {
+      return 'test4_error_log';
+    }
+
+    // Default runtime logging
+    return 'test3_error_log';
+
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Builds normalized error field.
+ */
+function buildErrorField_(evt) {
+  const sev = evt.severity || 'INFO';
+  const dom = evt.domain || 'UNKNOWN';
+  const typ = evt.event_type || 'UNSPECIFIED';
+  return sev + '|' + dom + '|' + typ;
+}
