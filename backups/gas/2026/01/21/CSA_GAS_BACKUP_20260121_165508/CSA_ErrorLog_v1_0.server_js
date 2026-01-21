@@ -1,0 +1,78 @@
+/**
+ * @file_name: CSA_ErrorLog_v1_1.gs
+ * @title: CSA Error Logging — Capture Only (Canonical Time)
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @binder: Technical / Product Binder
+ * @phase: DEV026 — Active (Post-Freeze)
+ * @thread: DEV022 → DEV023 → DEV026
+ * @created: 2026-01-18 20:46 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV026)
+ *
+ * PURPOSE
+ * -------
+ * Canonical, server-side, capture-only error logger.
+ *
+ * GUARANTEES
+ * ----------
+ * - Never throws
+ * - Never blocks caller execution
+ * - Append-only logging
+ * - Env is DERIVED, never caller-supplied
+ * - Timestamp is system-generated (MST)
+ *
+ * HARDCODED
+ * ---------
+ * Canonical timezone: America/Phoenix
+ */
+
+var CSA_CANONICAL_TZ = 'America/Phoenix';
+var CSA_CANONICAL_FMT = 'MM-dd-yyyy hh:mm a z';
+
+function CSA_NowMST_() {
+  return Utilities.formatDate(
+    new Date(),
+    CSA_CANONICAL_TZ,
+    CSA_CANONICAL_FMT
+  );
+}
+
+function CSA_LogError_(payload) {
+  try {
+    payload = payload || {};
+
+    var prefix =
+      (typeof CSA_SHEET_PREFIX !== 'undefined' && CSA_SHEET_PREFIX)
+        ? CSA_SHEET_PREFIX
+        : 'test3_'; // HARDCODED fallback
+
+    var sheet = SpreadsheetApp
+      .getActive()
+      .getSheetByName(prefix + 'error_log');
+    if (!sheet) return;
+
+    var env =
+      (typeof CSA_ENV !== 'undefined') ? CSA_ENV : 'UNKNOWN';
+
+    sheet.appendRow([
+      null,                       // A id
+      CSA_NowMST_(),              // B timestamp
+      payload.error || 'Unknown', // C error
+      payload.incident_id || null,// D
+      payload.details || null,    // E
+      payload.error_details || null,// F
+      payload.campus_attempted || null,// G
+      payload.original_ts || null,// H
+      payload.severity || 'ERROR',// I
+      env,                        // J
+      payload.source || null,     // K
+      payload.function_name || null,// L
+      payload.message || null     // M
+    ]);
+
+  } catch (ignore) {
+    // ABSOLUTE RULE: never throw
+  }
+}
