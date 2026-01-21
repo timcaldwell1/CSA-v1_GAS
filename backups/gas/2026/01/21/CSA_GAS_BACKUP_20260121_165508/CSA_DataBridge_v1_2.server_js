@@ -1,0 +1,239 @@
+/**
+/**
+ * @file_name: CSA_DataBridge_v1_2.gs
+ * @title: CSA Data Bridge — Mock-Aware + Observability
+ * @version: v1.2.0
+ * @Org_date_time: 2025-12-20 12:25 MST
+ * @Last Updated: 2026-01-14 09:18 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV008
+ *   ChatGPT, DEV012
+ *   ChatGPT, DEV020
+ *
+ * @description:
+ *   Read-only data bridge for CSA.
+ *   Supports DEV/QA Mock Mode and observability instrumentation.
+ *
+ * @provenance_note:
+ *   This file temporarily contained DEV020 review content.
+ *   Content was verified equivalent and normalized as authoritative v1.2.
+ *   No functional delta introduced during DEV020.
+ *
+ * =============================================
+ * @status: 01-14-2026 8PM MST -tim
+ *   AUTHORITATIVE — Runtime DataBridge
+ * ============================================
+ */
+
+
+Logger.log('DEV020 DATA: CSA_GetIncidentData_ ENTERED');
+
+function CSA_GetIncidentData_() {
+
+  const cfg = CSA_GetConfig_();
+  const props = PropertiesService.getScriptProperties();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE')).toUpperCase();
+
+  // ------------------------------------------------------------
+  // MOCK MODE (DEV012 — unchanged)
+  // ------------------------------------------------------------
+  if (mockMode === 'TRUE') {
+    try {
+      const mockIncidents = CSA_DEV012_GenerateMockIncidents_(cfg);
+
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: mockIncidents.length,
+        incidents: mockIncidents,
+        source: 'MOCK'
+      };
+
+    } catch (mockErr) {
+      CSA_LogException_(mockErr, {
+        severity: 'ERROR',
+        domain: 'DATABRIDGE',
+        event_type: 'MOCK_DATA_EXCEPTION',
+        details: 'Mock incident generation failed'
+      });
+
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'MOCK',
+        error: true
+      };
+    }
+  }
+
+  // ------------------------------------------------------------
+  // SHEET MODE (DEV012 — unchanged behavior)
+  // ------------------------------------------------------------
+  try {
+    const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('test3_incident_data');
+
+    if (!sheet) {
+      CSA_LogEvent_({
+        severity: 'FATAL',
+        domain: 'DATABRIDGE',
+        event_type: 'SHEET_MISSING',
+        details: 'test3_incident_data sheet not found'
+      });
+
+      throw new Error('test3_incident_data sheet not found.');
+    }
+
+    const values = sheet.getDataRange().getValues();
+
+    if (values.length < 2) {
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'SHEET'
+      };
+    }
+
+    const headers = values.shift();
+    const idx = indexHeaders_(headers);
+
+    // Header sanity (non-fatal, visibility only)
+    if (idx.incident_type === -1 || idx.description === -1) {
+      CSA_LogEvent_({
+        severity: 'ERROR',
+        domain: 'DATABRIDGE',
+        event_type: 'CONTRACT_SHAPE_MISMATCH',
+        details: 'Incident headers missing required fields',
+        error_details: 'headers=' + headers.join('|')
+      });
+    }
+
+    const incidents = [];
+    let warnMissingFields = 0;
+    let warnBadCoords = 0;
+
+    values.forEach((row, i) => {
+      const incident = {
+        id_a: row[0],
+        id_b: row[1],
+        incident_type: safeValue_(row[idx.incident_type]),
+        description: safeValue_(row[idx.description]),
+        latitude: row[idx.lat],
+        longitude: row[idx.lng],
+        campus: cfg.CSA_CAMPUS_NAME,
+        timestamp: new Date().toLocaleString('en-US', {
+          timeZone: 'America/Phoenix'
+        })
+      };
+
+      // Row-level observability (WARN only; never blocks)
+      if (!incident.incident_type || !incident.description) {
+        warnMissingFields++;
+        CSA_LogEvent_({
+          severity: 'WARN',
+          domain: 'PROCESSING',
+          event_type: 'FIELD_MISSING_REQUIRED',
+          incident_id: String(incident.id_a || ''),
+          details: 'Missing required incident fields',
+          error_details: 'row=' + (i + 2)
+        });
+      }
+
+      if (
+        incident.latitude !== '' &&
+        incident.longitude !== '' &&
+        !isFinite(Number(incident.latitude)) ||
+        !isFinite(Number(incident.longitude))
+      ) {
+        warnBadCoords++;
+        CSA_LogEvent_({
+          severity: 'WARN',
+          domain: 'PROCESSING',
+          event_type: 'COORDINATE_INVALID',
+          incident_id: String(incident.id_a || ''),
+          details: 'Invalid lat/lng values',
+          error_details:
+            'row=' + (i + 2) +
+            '; lat=' + incident.latitude +
+            '; lon=' + incident.longitude
+        });
+      }
+
+      incidents.push(incident);
+    });
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: incidents.length,
+      incidents: incidents,
+      source: 'SHEET',
+      meta: {
+        warn_missing_fields: warnMissingFields,
+        warn_bad_coords: warnBadCoords
+      }
+    };
+
+  } catch (err) {
+    CSA_LogException_(err, {
+      severity: 'ERROR',
+      domain: 'DATABRIDGE',
+      event_type: 'SHEET_READ_FAIL',
+      details: 'Exception while reading incident data'
+    });
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: 0,
+      incidents: [],
+      source: 'SHEET',
+      error: true
+    };
+  }
+}
+
+/**
+ * DEV012 — Synthetic incident generator (UNCHANGED)
+ */
+function CSA_DEV012_GenerateMockIncidents_(cfg) {
+  const baseLat = 33.45;
+  const baseLng = -112.07;
+  const incidents = [];
+
+  for (let i = 0; i < 25; i++) {
+    incidents.push({
+      id_a: 'MOCK-' + (i + 1),
+      id_b: '',
+      incident_type: 'Mock Incident',
+      description: 'DEV012 Synthetic Incident #' + (i + 1),
+      latitude: baseLat + (Math.random() * 0.01),
+      longitude: baseLng + (Math.random() * 0.01),
+      campus: cfg.CSA_CAMPUS_NAME,
+      timestamp: new Date(Date.now() - i * 3600000).toLocaleString('en-US', {
+        timeZone: 'America/Phoenix'
+      })
+    });
+  }
+
+  return incidents;
+}
+
+/**
+ * Header index helper (UNCHANGED)
+ */
+function indexHeaders_(headers) {
+  return {
+    incident_type: headers.indexOf('incident_type'),
+    description: headers.indexOf('description'),
+    lat: headers.findIndex(h => String(h).toLowerCase().includes('lat')),
+    lng: headers.findIndex(h => String(h).toLowerCase().includes('lon'))
+  };
+}
+
+/**
+ * Safe value guard (UNCHANGED)
+ */
+function safeValue_(value) {
+  return value === undefined || value === null ? '' : value;
+}
