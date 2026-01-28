@@ -1,0 +1,38 @@
+/**
+ * @file_name: CSA_Time_v1_0.gs
+ * @title: CSA Time Helpers — Canonical + UI Translation
+ * @version: v1.0.0
+ * @created: 2026-01-18 20:46 MST
+ *
+ * PURPOSE
+ * -------
+ * Single source of truth for timestamps.
+ * User is retired from timekeeping.
+ */
+
+// HARDCODED — canonical timezone (locked by spec)
+var CSA_CANONICAL_TZ = 'America/Phoenix';
+
+// HARDCODED — canonical display format (Sheets + logs)
+var CSA_CANONICAL_FMT = 'MM-dd-yyyy hh:mm a z';
+
+/**
+ * Returns canonical MST timestamp string.
+ */
+function CSA_NowMST_() {
+  return Utilities.formatDate(
+    new Date(),
+    CSA_CANONICAL_TZ,
+    CSA_CANONICAL_FMT
+  );
+}
+
+/**
+ * Returns epoch milliseconds for UI translation.
+ * @param {string|Date} ts Canonical timestamp or Date
+ */
+function CSA_ToEpochMs_(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts.getTime();
+  return new Date(ts).getTime(); // canonical MST string assumed
+}
