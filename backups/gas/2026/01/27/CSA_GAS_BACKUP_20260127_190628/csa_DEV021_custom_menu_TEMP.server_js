@@ -1,0 +1,59 @@
+/**
+ * @file_name: csa_DEV021_custom_menu_TEMP.gs
+ * @title: CSA DEV021 — Custom Menu Runners (TEMP)
+ * @version: v0.1.1
+ * @date_time: 2026-01-15 13:40 MST
+ *
+ * TEMP FILE NOTICE:
+ * - Temporary DEV/QA execution helpers
+ * - Candidate for deletion during GAS hygiene
+ */
+
+function onOpen() {
+  csa_AddMenu_DEV021_();
+}
+
+function csa_AddMenu_DEV021_() {
+  const ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('CSA')
+    .addSubMenu(
+      ui.createMenu('DEV / QA')
+        .addItem('Set ENV → DEV', 'csa_SetEnv_DEV_')
+        .addItem('Clone test3_* → test4_*', 'csa_Clone_Test3_To_Test4_')
+        .addSeparator()
+        .addItem('Run: Get Incident Data (Smoke)', 'csa_Run_GetIncidentData_')
+    )
+    .addToUi();
+}
+
+/* ===== RUNNERS ===== */
+
+function csa_SetEnv_DEV_() {
+  PropertiesService.getScriptProperties().setProperty('CSA_ENV', 'DEV');
+  SpreadsheetApp.getUi().alert('CSA_ENV set to DEV');
+}
+// COMMENTED BY Tim 1-22-2026
+/*
+function csa_Clone_Test3_To_Test4_() {
+  const ss = SpreadsheetApp.getActive();
+  const pairs = [
+    ['test3_incident_data', 'test4_incident_data'],
+    ['test3_safety_zones',  'test4_safety_zones']
+  ];
+
+  pairs.forEach(([src, dest]) => {
+    const s = ss.getSheetByName(src);
+    if (!s) throw new Error(`Missing ${src}`);
+    const d = ss.getSheetByName(dest);
+    if (d) ss.deleteSheet(d);
+    s.copyTo(ss).setName(dest);
+  });
+
+  SpreadsheetApp.getUi().alert('test4_* sheets refreshed');
+}
+*/
+function csa_Run_GetIncidentData_() {
+  // Explicit runner — bypasses IDE index entirely
+  CSA_GetIncidentData_();
+}
