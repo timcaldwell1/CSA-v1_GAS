@@ -1,0 +1,107 @@
+/**
+ * @file_name: CSA_DataBridge_v1_3_1_DEV032.gs
+ * @title: CSA Data Bridge — Correct Incident Sheet Resolution
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.3.1
+ * @Org_date_time: 2026-01-25 10:45 MST
+ * @Last Updated: 2026-01-25 10:45 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Read-only incident retrieval with correct sheet naming.
+ * Fail-open by design.
+ */
+
+function CSA_GetIncidentData_(requestId) {
+
+  const props = PropertiesService.getScriptProperties();
+  const env = String(props.getProperty('CSA_ENV') || 'UNKNOWN').toUpperCase();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE') || 'FALSE').toUpperCase();
+
+  const cfg = CSA_GetConfig_();
+
+  // ----------------------------
+  // Resolve incident sheet name
+  // ----------------------------
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  let INCIDENT_SHEET_NAME;
+
+  if (!prefix || prefix === 'incident') {
+    INCIDENT_SHEET_NAME = 'incident_data'; // canonical PROD sheet
+  } else {
+    INCIDENT_SHEET_NAME = prefix + '_incident_data';
+  }
+
+  // ----------------------------
+  // MOCK MODE
+  // ----------------------------
+  if (mockMode === 'TRUE') {
+    const incidents = CSA_DEV012_GenerateMockIncidents_(cfg);
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: incidents.length,
+      incidents: incidents,
+      source: 'MOCK'
+    };
+  }
+
+  // ----------------------------
+  // SHEET MODE
+  // ----------------------------
+  try {
+    const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+
+    if (!sheet) {
+      throw new Error('Incident sheet not found: ' + INCIDENT_SHEET_NAME);
+    }
+
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) {
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'SHEET'
+      };
+    }
+
+    const headers = values.shift();
+    const idx = indexHeaders_(headers);
+
+    const incidents = [];
+
+    values.forEach(row => {
+      incidents.push({
+        id_a: row[0],
+        incident_type: row[idx.incident_type],
+        description: row[idx.description],
+        latitude: row[idx.lat],
+        longitude: row[idx.lng],
+        timestamp_display: row[idx.timestamp_display],
+        timestamp_iso: row[idx.timestamp_iso],
+        timestamp_sort: row[idx.timestamp_sort]
+      });
+    });
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: incidents.length,
+      incidents: incidents,
+      source: 'SHEET'
+    };
+
+  } catch (err) {
+    CSA_LogException_(err, 'CSA_GetIncidentData_');
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: 0,
+      incidents: [],
+      error: true
+    };
+  }
+}
