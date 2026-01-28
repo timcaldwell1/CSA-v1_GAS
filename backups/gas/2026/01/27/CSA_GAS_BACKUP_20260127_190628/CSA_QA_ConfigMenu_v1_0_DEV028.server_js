@@ -1,0 +1,127 @@
+/**
+ * @file_name: CSA_QA_ConfigMenu_v1_0_DEV028.gs
+ * @title: CSA QA Config Menu + Property Profiles (Replacement for QA Sidebar)
+ * @product: CSA — Church Safety Alerts
+ * @product_version: CSA_v1.1.0
+ * @version: v1.0.0
+ * @create_date: 2026-01-22 08:53 MST
+ * @last_updated: 2026-01-22 08:53 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV028)
+ *
+ * FILE TYPE
+ * ---------
+ * NEW GAS FILE (additive). Safe to add without editing existing files.
+ *
+ * PURPOSE
+ * -------
+ * Replaces the abandoned QA Sidebar with:
+ * - A Spreadsheet menu (container-bound projects only) to set QA/DEV/PROD property profiles
+ * - A config dump + minimal “scope touch” helper for reauth verification
+ *
+ * NON-NEGOTIABLES
+ * --------------
+ * - Never set MOCK_MODE true when ENV is PROD (guarded here even before router).
+ * - Does not modify routing behavior.
+ */
+
+// ---------- Menu Wiring (container-bound only) ----------
+function onOpen(e) {
+  CSA_QA_ConfigMenu_OnOpen_();
+}
+
+function CSA_QA_ConfigMenu_OnOpen_() {
+  // If this script is not container-bound, SpreadsheetApp.getUi will throw.
+  // That’s fine: it simply means “no menu surface here”.
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('CSA')
+      .addSubMenu(
+        ui.createMenu('QA Tools')
+          .addItem('Dump Script Properties (CSA_*)', 'CSA_QA_DumpProps_')
+          .addSeparator()
+          .addItem('Set Profile: PROD Runtime (test3_, MOCK=false)', 'CSA_QA_SetProfile_PROD_')
+          .addItem('Set Profile: QA Runtime (test4_, MOCK=false)', 'CSA_QA_SetProfile_QA_')
+          .addItem('Set Profile: DEV Mock (test4_, MOCK=true)', 'CSA_QA_SetProfile_DEV_MOCK_')
+          .addSeparator()
+          .addItem('Scope Touch: Spreadsheet Read (reauth helper)', 'CSA_QA_ScopeTouch_SpreadsheetRead_')
+      )
+      .addToUi();
+  } catch (err) {
+    // No UI available (standalone script, webapp context, or missing container binding)
+    Logger.log('[CSA_QA_MENU] Menu not installed (non-container context). ' + (err && err.message ? err.message : err));
+  }
+}
+
+// ---------- Profiles ----------
+function CSA_QA_SetProfile_PROD_() {
+  CSA_QA_ApplyProfile_({
+    CSA_ENV: 'PROD',
+    CSA_SHEET_PREFIX: 'test3_',
+    CSA_MOCK_MODE: 'FALSE'
+  }, 'PROD Runtime');
+}
+
+function CSA_QA_SetProfile_QA_() {
+  CSA_QA_ApplyProfile_({
+    CSA_ENV: 'QA',
+    CSA_SHEET_PREFIX: 'test4_',
+    CSA_MOCK_MODE: 'FALSE'
+  }, 'QA Runtime');
+}
+
+function CSA_QA_SetProfile_DEV_MOCK_() {
+  CSA_QA_ApplyProfile_({
+    CSA_ENV: 'DEV',
+    CSA_SHEET_PREFIX: 'test4_',
+    CSA_MOCK_MODE: 'TRUE'
+  }, 'DEV Mock');
+}
+
+function CSA_QA_ApplyProfile_(kv, label) {
+  // Guardrail: never allow PROD + MOCK true.
+  if (String(kv.CSA_ENV).toUpperCase() === 'PROD' && String(kv.CSA_MOCK_MODE).toUpperCase() === 'TRUE') {
+    throw new Error('Refused: CSA_ENV=PROD with CSA_MOCK_MODE=TRUE is prohibited.');
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  Object.keys(kv).forEach(function(key) {
+    props.setProperty(key, String(kv[key]));
+  });
+
+  Logger.log('[CSA_QA_PROFILE] Applied: ' + label);
+  CSA_QA_DumpProps_();
+}
+
+// ---------- Utilities ----------
+function CSA_QA_DumpProps_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  Logger.log('==== Script Properties Dump (CSA_*) ====');
+  Object.keys(props)
+    .filter(function(k) { return k.indexOf('CSA_') === 0; })
+    .sort()
+    .forEach(function(k) { Logger.log(k + ' = ' + props[k]); });
+  Logger.log('=======================================');
+}
+
+/**
+ * Minimal reauth helper:
+ * Touches Spreadsheet read access using CSA_SPREADSHEET_ID if present.
+ * This is intended to trigger OAuth consent when scopes were revoked.
+ */
+function CSA_QA_ScopeTouch_SpreadsheetRead_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+
+  if (!ssId) {
+    Logger.log('[CSA_QA_SCOPE_TOUCH] CSA_SPREADSHEET_ID missing. Set it first, then retry.');
+    return;
+  }
+
+  // This should trigger consent if spreadsheet scopes are not currently granted.
+  var ss = SpreadsheetApp.openById(ssId);
+  var name = ss.getName();
+  var sheets = ss.getSheets();
+  Logger.log('[CSA_QA_SCOPE_TOUCH] OK: openById succeeded. Spreadsheet="' + name + '" sheets=' + sheets.length);
+}
