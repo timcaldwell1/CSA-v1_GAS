@@ -1,0 +1,58 @@
+/**
+ * @file_name: CSA_QA_Config_Setup_v1_1_DEV032.gs
+ * @title: CSA QA Config Sheet Initializer
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 10:10 MST
+ * @Last Updated: 2026-01-25 10:10 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * One-time initializer for the qa_mock_set configuration sheet.
+ *
+ * HARD RULES
+ * ----------
+ * - Safe to run multiple times
+ * - Never deletes data
+ * - Never touches PROD logic
+ */
+
+function CSA_QA_InitMockSetSheet_() {
+  const props = PropertiesService.getScriptProperties();
+  const spreadsheetId = props.getProperty('CSA_SPREADSHEET_ID');
+  if (!spreadsheetId) {
+    throw new Error('CSA_SPREADSHEET_ID not set');
+  }
+
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  let sheet = ss.getSheetByName('qa_mock_set');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('qa_mock_set');
+  }
+
+  const headers = ['mock_set', 'enabled', 'description', 'last_updated'];
+  const range = sheet.getRange(1, 1, 1, headers.length);
+  range.setValues([headers]);
+
+  const existing = sheet.getLastRow();
+  if (existing < 2) {
+    const now = Utilities.formatDate(
+      new Date(),
+      'America/Phoenix',
+      'yyyy-MM-dd HH:mm:ss'
+    );
+
+    sheet.getRange(2, 1, 3, headers.length).setValues([
+      ['A', 'FALSE', 'Invalid location mock', now],
+      ['B', 'FALSE', 'Invalid timestamp mock', now],
+      ['C', 'FALSE', 'Router-level hard fail mock', now]
+    ]);
+  }
+
+  sheet.autoResizeColumns(1, headers.length);
+  return 'qa_mock_set sheet initialized';
+}
