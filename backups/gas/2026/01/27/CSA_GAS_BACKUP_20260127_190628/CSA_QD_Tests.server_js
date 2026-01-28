@@ -1,0 +1,90 @@
+
+function _linkTest() {
+  // Shows name of linked sheets 
+  const cfg = PropertiesService.getScriptProperties().getProperties();
+  const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+  Logger.log(ss.getName());
+}
+
+function CSA_ForceAuth_() {
+  Logger.log(Session.getActiveUser().getEmail());
+}
+
+
+/** 
+ * CSA_Force_Project_History_Update
+ * What it does: Writes a timestamp to 
+ * Script Properties → counts as a project
+ * change → creates a new Project History 
+ * entry without affecting runtime behavior
+ */
+
+/**
+ * @file_name: CSA_Force_Project_History_Update.gs
+ * @purpose: Force a new GAS Project History entry via safe no-op
+ * @thread: DEV016
+ */
+
+function CSA_Force_Project_History_Update() {
+  const props = PropertiesService.getScriptProperties();
+  const ts = new Date().toISOString();
+
+  props.setProperty('CSA_HISTORY_TOUCH', ts);
+
+  Logger.log('GAS Project History updated at: ' + ts);
+}
+
+
+/**
+ * @file_name: CSA_P1_Layer1_DriveDiag_v1_0.gs
+ * @version: v1.0
+ * @date_time: 2025-12-26 01:58 MST
+ *
+ * Purpose: Diagnose Drive folder ID access under the CURRENT executing identity.
+ */
+
+/*
+const CSA_TEST_FOLDER_IDS = [
+  '1ob4ft_tGTYgvFbGuXIzFezvxgSXrPsVd', // old
+  '1aCzDAHqsb97Zi-GK7Qq_pDWZl_X4bO2H'  // new
+];
+*/
+
+/*
+function CSA_P1_Layer1_DriveDiag_Run() {
+  const effective = Session.getEffectiveUser().getEmail();
+  const active = Session.getActiveUser().getEmail(); // may be blank depending on domain settings
+
+  Logger.log('===== CSA DRIVE DIAG =====');
+  Logger.log('Effective User: ' + effective);
+  Logger.log('Active User: ' + active);
+  Logger.log('Script ID: ' + ScriptApp.getScriptId());
+  Logger.log('Timestamp (MST): ' + Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss'));
+
+  CSA_TEST_FOLDER_IDS.forEach(function(id) {
+    try {
+      const f = DriveApp.getFolderById(id);
+      Logger.log('---');
+      Logger.log('Folder ID: ' + id);
+      Logger.log('Folder Name: ' + f.getName());
+      Logger.log('Folder URL: ' + f.getUrl());
+
+      // Try creating a tiny test folder to prove write access
+      const testName = 'Z_DIAG_TEST_' + Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyyMMdd_HHmmss');
+      const child = f.createFolder(testName);
+      Logger.log('WRITE TEST: PASS (created) => ' + child.getUrl());
+
+      // Cleanup (optional). Comment out if you want to inspect the created folder.
+      child.setTrashed(true);
+      Logger.log('CLEANUP: trashed test folder.');
+
+    } catch (e) {
+      Logger.log('---');
+      Logger.log('Folder ID: ' + id);
+      Logger.log('ACCESS TEST: FAIL => ' + (e && e.message ? e.message : e));
+    }
+  });
+
+  Logger.log('===== END DIAG =====');
+}
+*/
