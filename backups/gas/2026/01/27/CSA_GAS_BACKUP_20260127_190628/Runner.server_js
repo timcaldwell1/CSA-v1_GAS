@@ -1,0 +1,14 @@
+function FunctRunner() {
+  // CSA_VERIFY_DataBridge_()
+  // CSA_ProveContainerBinding_()
+  // CSA_ForceAuth_()
+  // CSA_StatusSnapshot_Run_()
+  return true;
+}
+/*
+function provokeSheetScopeAuth() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const name = ss.getName();
+  Logger.log("You authorized access to: " + name);
+}
+*/
