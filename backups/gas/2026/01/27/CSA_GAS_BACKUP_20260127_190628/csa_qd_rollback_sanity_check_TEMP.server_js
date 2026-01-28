@@ -1,0 +1,13 @@
+function csa_qd_rollback_sanity_check() {
+  const p = PropertiesService.getScriptProperties().getProperties();
+  const ok =
+    p.CSA_ENV === 'PROD' &&
+    p.CSA_SHEET_PREFIX === 'test3_' &&
+    p.CSA_MOCK_MODE === 'FALSE' &&
+    typeof CSA_Route_ === 'function' &&
+    typeof doGet === 'function';
+
+  Logger.log(ok
+    ? 'ROLLBACK VERIFIED — YOU ARE inSANE'
+    : 'ROLLBACK FAILED — CHECK ENV / PREFIX / ROUTER');
+}
