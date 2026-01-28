@@ -1,0 +1,128 @@
+/**
+ * @file_name: CSA_DataBridge_v1_3_2_DEV032.gs
+ * @title: CSA Data Bridge — Canonical Incident Loader + QA Control (D5)
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.3.2
+ * @Org_date_time: 2026-01-25 15:40 MST
+ * @Last Updated: 2026-01-25 15:40 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * Line 27 - 79 was replaced by DEV032 2026-01-27 6:30 PM -tim
+ * 
+ * PURPOSE
+ * -------
+ * Single authoritative incident data loader.
+ * Implements:
+ * - Correct sheet resolution
+ * - QA Mock enforcement (A / B / C)
+ * - D5 qa_mock_set control sheet
+ *
+ * HARD RULES
+ * ----------
+ * - Fail-open (never blocks UI)
+ * - Exactly one CSA_GetIncidentData_ definition
+ * - PROD ignores QA config entirely
+ */
+
+/**
+ * CSA_GetIncidentData_
+ * Production version — returns filtered incident payload
+ * CSA_v1 — DEV033 Patch to fix no-incident rendering
+ * Author: DEV032
+ * Updated: 2026-01-27
+ * Version: v1.3.3
+ */
+function CSA_GetIncidentData_(requestId) {
+  const props = PropertiesService.getScriptProperties();
+  const cfg = CSA_GetConfig_();
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  const INCIDENT_SHEET_NAME = (!prefix || prefix === 'incident')
+    ? 'incident_data'
+    : prefix + '_incident_data';
+
+  const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+  const idx = {};
+  headers.forEach((h, i) => { idx[h.trim()] = i; });
+
+  const incidents = [];
+
+  values.forEach((row, r) => {
+    const incident = {
+      id_a: row[idx["id"]],
+      incident_type: row[idx["incident_type"]],
+      description: row[idx["description"]],
+      latitude: row[idx["latitude"]],
+      longitude: row[idx["longitude"]],
+      timestamp_display: row[idx["timestamp_display"]],
+      timestamp_iso: row[idx["timestamp_iso"]],
+      timestamp_sort: row[idx["timestamp_sort"]]
+    };
+
+    const valid = (incident.latitude && incident.longitude && incident.id_a);
+    if (!valid) return;
+
+    incidents.push(incident);
+  });
+
+  return {
+    campus: cfg.CSA_CAMPUS_NAME,
+    count: incidents.length,
+    incidents: incidents,
+    error: false,
+    source: 'SHEET'
+  };
+}
+
+/**
+ * ------------------------------------------------------------
+ * D5 — QA Mock Config Loader
+ * ------------------------------------------------------------
+ * Sheet: qa_mock_set
+ * Columns:
+ *   mock_set | enabled
+ */
+function loadQAMockConfig_() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const ss = SpreadsheetApp.openById(props.getProperty('CSA_SPREADSHEET_ID'));
+    const sheet = ss.getSheetByName('qa_mock_set');
+
+    if (!sheet) return {};
+
+    const values = sheet.getDataRange().getValues();
+    values.shift(); // headers
+
+    const map = {};
+    values.forEach(r => {
+      const key = String(r[0] || '').toUpperCase();
+      const enabled = String(r[1] || '').toUpperCase() === 'TRUE';
+      if (key) map[key] = enabled;
+    });
+
+    return map;
+  } catch (e) {
+    return {};
+  }
+}
+
+/**
+ * Header index helper
+ */
+function indexHeaders_(headers) {
+  return {
+    incident_type: headers.indexOf('incident_type'),
+    description: headers.indexOf('description'),
+    lat: headers.findIndex(h => String(h).toLowerCase().includes('lat')),
+    lng: headers.findIndex(h => String(h).toLowerCase().includes('lon')),
+    timestamp_display: headers.indexOf('timestamp_display'),
+    timestamp_iso: headers.indexOf('timestamp_iso'),
+    timestamp_sort: headers.indexOf('timestamp_sort'),
+    qa_mock_set: headers.indexOf('qa_mock_set')
+  };
+}
