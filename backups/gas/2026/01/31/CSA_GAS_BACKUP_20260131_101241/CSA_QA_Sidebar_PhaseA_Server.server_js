@@ -1,0 +1,60 @@
+/**
+ * @file_name: CSA_QA_Sidebar_PhaseA.gs
+ * @product: CSA_v1
+ * @product_version: v1.1.0
+ * @phase: DEV028 Phase A
+ * @scope: QA Sidebar (read-only)
+ * @created: 2026-01-21 MST
+ * @author: Tim Caldwell, ChatGPT (DEV028)
+ *
+ * HARD RULES:
+ * - Read-only
+ * - No sheet writes
+ * - No property writes
+ * - PROD-safe
+ */
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('CSA')
+    .addItem('QA Sidebar', 'CSA_QA_Sidebar_Show_')
+    .addToUi();
+}
+
+/**
+ * Opens the QA Sidebar
+ */
+function CSA_QA_Sidebar_Show_() {
+  const html = HtmlService
+    .createHtmlOutputFromFile('CSA_QA_Sidebar_PhaseA_UI')
+    .setTitle('CSA — QA Sidebar');
+
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * Returns read-only runtime context
+ * @returns {Object}
+ */
+function CSA_QA_Sidebar_GetContext_() {
+  const props = PropertiesService.getScriptProperties();
+
+  const env = props.getProperty('CSA_ENV') || 'UNKNOWN';
+  const sheetPrefix = props.getProperty('CSA_SHEET_PREFIX') || 'UNKNOWN';
+  const installVersion = props.getProperty('CSA_INSTALL_VERSION') || 'UNKNOWN';
+  const mockMode = props.getProperty('CSA_MOCK_MODE') === 'TRUE';
+
+  const warnings = [];
+  if (env === 'PROD') {
+    warnings.push('ENV_IS_PROD_BLOCK_ACTIONS');
+  }
+
+  return {
+    env: env,
+    sheet_prefix: sheetPrefix,
+    install_version: installVersion,
+    mock_mode: mockMode,
+    timestamp_tz: 'America/Phoenix',
+    warnings: warnings
+  };
+}
