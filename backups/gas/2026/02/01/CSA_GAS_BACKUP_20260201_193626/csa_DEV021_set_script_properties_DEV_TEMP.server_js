@@ -1,0 +1,26 @@
+/**
+ * @file_name: csa_DEV021_set_script_properties_DEV_TEMP.gs
+ * @title: CSA DEV021 — Set Script Properties to DEV (TEMP)
+ * @product: Church Safety Alerts (CSA)
+ * @version: v0.1.0
+ * @date_time: 2026-01-15 08:31 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV021
+ *
+ * TEMP FILE NOTICE:
+ * - This file is temporary / one-off.
+ * - Candidate for deletion during GAS hygiene.
+ * - Do not treat as production module unless promoted by decision log entry.
+ **/
+
+function csa_DEV021_SetScriptProperties_DEV_TEMP_() {
+  const props = PropertiesService.getScriptProperties();
+
+  props.setProperties({
+    CSA_ENV: 'DEV',
+    CSA_SHEET_PREFIX: 'test4_'
+  }, true);
+
+  Logger.log('DEV021: Script Properties set to DEV.');
+}
