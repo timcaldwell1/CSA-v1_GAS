@@ -1,0 +1,159 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_DEV037_scan_logger_call_sites_TEMP.gs
+ * @title: DEV037 — Logger Call-Site Scanner (Apps Script API)
+ * @product: CSA — Church Safety Alerts
+ * @version: v0.1.0 (TEMP)
+ * @binder_type: Implementation Utility (DEV/QA)
+ * @current_phase: DEV037 — error_log stabilization
+ *
+ * @thread_lineage:
+ *   DEV031 (Observability spec v1.1.0)
+ *   → DEV032 (CSA_LogEvent_ implementation)
+ *   → DEV037 (error_log working order)
+ *
+ * @create_date: 2026-01-31 (MST)
+ * @last_updated: 2026-01-31 (MST)
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV037
+ *
+ * --------------------------------------------------------------------
+ * PURPOSE
+ * --------------------------------------------------------------------
+ * Scan the current Apps Script project source for logger call sites:
+ * - CSA_LogEvent_(
+ * - CSA_LogError_(
+ * - CSA_LogException_(
+ * - CSA_LogRouterGuardFailure_(
+ * - Logger.log(
+ *
+ * Output goes to Execution Logs (View > Logs).
+ *
+ * NOTES
+ * - Requires Apps Script API access to read project content.
+ * - Fail-open: if API not enabled or scopes missing, it prints a single
+ *   diagnostic and exits.
+ *
+ * --------------------------------------------------------------------
+ */
+
+function DEV037_ScanLoggerCallSites() {
+  try {
+    const WRITE_RESULTS_TO_SHEET = false; // HARDCODED: flip only if you want a sheet output
+    const SHEET_NAME_SUFFIX = '_logger_call_sites'; // HARDCODED utility output sheet name
+
+    const props = PropertiesService.getScriptProperties();
+    const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'test3'; // HARDCODED fallback
+    const ssId = props.getProperty('CSA_SPREADSHEET_ID') || '';
+
+    // Prefer the live script id (less fragile than a property)
+    const scriptId = (typeof ScriptApp !== 'undefined' && ScriptApp.getScriptId)
+      ? ScriptApp.getScriptId()
+      : (props.getProperty('CSA_PROJECT_ID') || '');
+
+    if (!scriptId) {
+      Logger.log('[DEV037][SCAN][DROP] Missing scriptId (ScriptApp.getScriptId unavailable and CSA_PROJECT_ID empty).');
+      return [];
+    }
+
+    const patterns = [
+      { label: 'CSA_LogEvent_', re: /CSA_LogEvent_\s*\(/g },
+      { label: 'CSA_LogError_', re: /CSA_LogError_\s*\(/g },
+      { label: 'CSA_LogException_', re: /CSA_LogException_\s*\(/g },
+      { label: 'CSA_LogRouterGuardFailure_', re: /CSA_LogRouterGuardFailure_\s*\(/g },
+      { label: 'Logger.log', re: /Logger\.log\s*\(/g }
+    ]; // HARDCODED: scanner targets
+
+    const url = 'https://script.googleapis.com/v1/projects/' + encodeURIComponent(scriptId) + '/content'; // HARDCODED endpoint
+    const token = ScriptApp.getOAuthToken();
+
+    const resp = UrlFetchApp.fetch(url, {
+      method: 'get',
+      muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + token }
+    });
+
+    const code = resp.getResponseCode();
+    if (code !== 200) {
+      Logger.log('[DEV037][SCAN][DROP] Apps Script API call failed. code=' + code);
+      Logger.log('[DEV037][SCAN][HINT] If needed: enable "Apps Script API" in Google Cloud / Advanced Google Services.');
+      return [];
+    }
+
+    const payload = JSON.parse(resp.getContentText() || '{}');
+    const files = payload.files || [];
+
+    const results = [];
+    files.forEach(f => {
+      const name = f.name || '(unnamed)';
+      const source = f.source || '';
+      if (!source) return;
+
+      patterns.forEach(p => {
+        let m;
+        while ((m = p.re.exec(source)) !== null) {
+          const idx = m.index;
+          const line = 1 + source.substring(0, idx).split('\n').length - 1;
+          const lineText = _DEV037_GetLineText_(source, line);
+
+          results.push({
+            pattern: p.label,
+            file: name,
+            line: line,
+            snippet: (lineText || '').trim()
+          });
+        }
+        // Reset lastIndex for safety per file
+        p.re.lastIndex = 0;
+      });
+    });
+
+    Logger.log('====================================================');
+    Logger.log('[DEV037][SCAN] Found ' + results.length + ' logger call-site hits.');
+    results.forEach(r => {
+      Logger.log('[DEV037][SCAN] ' + r.pattern + ' | ' + r.file + ':' + r.line + ' | ' + r.snippet);
+    });
+    Logger.log('====================================================');
+
+    if (WRITE_RESULTS_TO_SHEET && ssId) {
+      _DEV037_WriteResultsToSheet_(ssId, prefix + SHEET_NAME_SUFFIX, results);
+      Logger.log('[DEV037][SCAN] Results written to sheet: ' + prefix + SHEET_NAME_SUFFIX);
+    }
+
+    return results;
+
+  } catch (e) {
+    // fail-open
+    Logger.log('[DEV037][SCAN][DROP] Scanner exception: ' + (e && e.message ? e.message : e));
+    return [];
+  }
+}
+
+function _DEV037_GetLineText_(src, lineNum) {
+  try {
+    const lines = (src || '').split('\n');
+    if (lineNum < 1 || lineNum > lines.length) return '';
+    return lines[lineNum - 1] || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function _DEV037_WriteResultsToSheet_(spreadsheetId, sheetName, results) {
+  try {
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    let sh = ss.getSheetByName(sheetName);
+    if (!sh) sh = ss.insertSheet(sheetName);
+
+    sh.clearContents();
+    sh.getRange(1, 1, 1, 4).setValues([['pattern', 'file', 'line', 'snippet']]);
+
+    if (!results || !results.length) return;
+
+    const values = results.map(r => [r.pattern, r.file, r.line, r.snippet]);
+    sh.getRange(2, 1, values.length, 4).setValues(values);
+  } catch (e) {
+    // fail-open
+  }
+}
