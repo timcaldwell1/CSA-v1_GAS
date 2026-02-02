@@ -1,0 +1,51 @@
+/**
+ * @file_name: CSA_WebApp_Facade_v1_1_DEV032.gs
+ * @title: CSA WebApp Facade — Incident Data Endpoint
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 15:10 MST
+ * @Last Updated: 2026-01-25 15:10 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Stable server-side entry point for WebApp UI.
+ * Called via google.script.run from HTML.
+ *
+ * IMPORTANT
+ * ---------
+ * - Do NOT rename this function without updating HTML
+ * - Delegates to CSA_GetIncidentData_
+ * - Adds request correlation
+ */
+
+function CSA_WebApp_GetIncidentData() {
+  const requestId = Utilities.getUuid();
+
+  try {
+    const result = CSA_GetIncidentData_(requestId);
+
+    // Defensive normalization for UI
+    if (!result || typeof result !== 'object') {
+      return {
+        campus: '',
+        count: 0,
+        incidents: [],
+        error: true
+      };
+    }
+
+    return result;
+
+  } catch (err) {
+    CSA_LogException_(err, 'CSA_WebApp_GetIncidentData');
+    return {
+      campus: '',
+      count: 0,
+      incidents: [],
+      error: true
+    };
+  }
+}
