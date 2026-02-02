@@ -1,0 +1,172 @@
+/**
+ * @file_name: CSA_P1_Layer1_Backup_v1_5.gs
+ * @project_name: CSA_v1
+ * @product: CSA — Church Safety Alerts
+ * @product_version: v1.0.0
+ * @layer: P1 / Layer 1 — GAS Source Snapshot
+ * @version: v1.5 (Advanced Drive API)
+ * @date_time: 2025-12-27 07:18 MST
+ *
+ * HARD GUARANTEES:
+ * - No DriveApp usage
+ * - Advanced Drive API only
+ * - Apps Script API for source read
+ * - Deterministic folder creation
+ */
+
+/* ===========================
+ * GLOBAL CONFIG
+ * =========================== */
+
+const CSA_TIMEZONE = 'America/Phoenix';
+
+/**
+ * Parent folder:
+ * /CSA_v1/CSA_v1_Backup/CSA_v1_GAS_Backup/
+ *
+ * This folder MUST already exist.
+ * //HARDCODED
+ */
+const CSA_GAS_BACKUP_ROOT_ID = '1aCzDAHqsb97Zi-GK7Qq_pDWZl_X4bO2H';
+
+/* ===========================
+ * PUBLIC ENTRY
+ * =========================== */
+
+function CSA_P1_Layer1_RunSnapshot() {
+
+  const timestampMST = Utilities.formatDate(
+    new Date(),
+    CSA_TIMEZONE,
+    'yyyy-MM-dd_HHmm'
+  );
+
+  const productVersion = 'v1.0.0';
+  const checkpoint = getNextMinorMilestone_();
+  const snapshotName = `CSA_${productVersion}_${checkpoint}_${timestampMST}`;
+
+  // Create snapshot folder
+  const snapshotFolderId = createFolder_(
+    snapshotName,
+    CSA_GAS_BACKUP_ROOT_ID
+  );
+
+  // Create GAS subfolder
+  const gasFolderId = createFolder_(
+    'GAS',
+    snapshotFolderId
+  );
+
+  // Pull project source via Apps Script API
+  const scriptId = ScriptApp.getScriptId();
+  const response = Script.Projects.getContent(scriptId);
+
+  if (!response || !response.files || response.files.length === 0) {
+    throw new Error('Layer 1 Abort: No files returned by Apps Script API.');
+  }
+
+  let fileCount = 0;
+
+  response.files.forEach(file => {
+    if (!file || !file.source || !file.name || !file.type) return;
+
+    if (file.type === 'SERVER_JS' || file.type === 'HTML') {
+      createTextFile_(file.name, file.source, gasFolderId);
+      fileCount++;
+      return;
+    }
+
+    if (file.type === 'JSON') {
+      createTextFile_(file.name, file.source, snapshotFolderId);
+      fileCount++;
+    }
+  });
+
+  writeManifest_(snapshotFolderId, productVersion, checkpoint, timestampMST, fileCount);
+  writeSnapshotMeta_(snapshotFolderId, productVersion, checkpoint, timestampMST, fileCount);
+}
+
+/* ===========================
+ * DRIVE API HELPERS
+ * =========================== */
+
+function createFolder_(name, parentId) {
+  const resource = {
+    name: name,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: [parentId]
+  };
+
+  const folder = Drive.Files.create(resource);
+  return folder.id;
+}
+
+function createTextFile_(name, content, parentId) {
+  const blob = Utilities.newBlob(
+    content,
+    'text/plain',
+    name
+  );
+
+  Drive.Files.create(
+    { name: name, parents: [parentId] },
+    blob
+  );
+}
+
+/* ===========================
+ * MM SEQUENCING
+ * =========================== */
+
+function getNextMinorMilestone_() {
+  const props = PropertiesService.getScriptProperties();
+  const current = props.getProperty('CSA_LAYER1_MM') || '00';
+  const next = String(parseInt(current, 10) + 1).padStart(2, '0');
+  props.setProperty('CSA_LAYER1_MM', next);
+  return `MM${next}`;
+}
+
+/* ===========================
+ * MANIFEST / META
+ * =========================== */
+
+function writeManifest_(folderId, productVersion, checkpoint, timestampMST, fileCount) {
+
+  const text =
+`CSA Layer 1 Snapshot Manifest
+--------------------------------
+Product: CSA
+Project Name: CSA_v1
+Product Version: ${productVersion}
+Checkpoint: ${checkpoint}
+Timestamp (MST): ${timestampMST}
+Script ID: ${ScriptApp.getScriptId()}
+Owner: ${Session.getEffectiveUser().getEmail()}
+Files Captured: ${fileCount}
+Layer: P1 / Layer 1
+Sanitized: false
+`;
+
+  createTextFile_('MANIFEST.txt', text, folderId);
+}
+
+function writeSnapshotMeta_(folderId, productVersion, checkpoint, timestampMST, fileCount) {
+
+  const meta = {
+    product: 'CSA',
+    projectName: 'CSA_v1',
+    productVersion: productVersion,
+    checkpoint: checkpoint,
+    snapshotTimeMST: timestampMST,
+    scriptId: ScriptApp.getScriptId(),
+    fileCount: fileCount,
+    layer: 'P1-L1',
+    sanitized: false
+  };
+
+  createTextFile_(
+    'SNAPSHOT_META.json',
+    JSON.stringify(meta, null, 2),
+    folderId
+  );
+}
