@@ -1,0 +1,154 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_sync_test3_to_test4_TEMP.gs
+ * @title: CSA TEMP Tool — Sync test3_* → test4_* + Log Isolation
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v0.3-TEMP
+ * @binder_type: Tooling / QA Support (Temporary)
+ * @current_phase: DEV038
+ *
+ * @thread_lineage:
+ *   DEV037 (Observability Rehab)
+ *   → DEV038 (Implementation)
+ *
+ * @create_date: 2026-02-01
+ * @last_updated: 2026-02-01
+ * @authors: Tim Caldwell, ChatGPT (DEV038)
+ *
+ * // SAFE TO DELETE DURING Hygiene.
+ *
+ * --------------------------------------------------------------------
+ * ⚠️ TEMPORARY TOOL — MAY BE DELETED
+ *
+ * Purpose:
+ *   1) One-way sync of test3_* sheets to test4_* sheets for QA setup.
+ *   2) Safe clearing of log sheets for per-test isolation.
+ *
+ * Explicit Constraints:
+ *   - NO menu creation
+ *   - NO runtime behavior changes
+ *   - NO schema mutation
+ *   - Headers are always preserved
+ *   - HARD BLOCK when CSA_ENV === 'PROD'
+ *
+ * Usage (Editor-run only):
+ *   - csa_sync_test3_to_test4_TEMP()
+ *   - csa_clear_test_logs_TEMP()
+ *
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * Guard: refuse to run tooling in PROD.
+ * Fail politely: log + return. Never throw.
+ */
+function _csa_abort_if_prod_TEMP_() {
+  const props = PropertiesService.getScriptProperties();
+  const env = String(props.getProperty('CSA_ENV') || '').toUpperCase();
+
+  if (env === 'PROD') {
+    Logger.log('[TEMP TOOL][ABORT] CSA_ENV=PROD — tooling is disabled.');
+    return true; // signal abort
+  }
+  return false; // safe to proceed
+}
+
+/**
+ * Sync test3_* sheets to matching test4_* sheets.
+ * Replaces content entirely (headers + rows).
+ */
+function csa_sync_test3_to_test4_TEMP() {
+  if (_csa_abort_if_prod_TEMP_()) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Explicit allow-list. Modify deliberately.
+  const SHEETS_TO_SYNC = [
+    'test3_incident_data',
+    'test3_keywords',
+    'test3_safety_zones',
+    'test3_error_log',
+    'test3_audit_log'
+  ];
+
+  SHEETS_TO_SYNC.forEach(function (sourceName) {
+    const targetName = sourceName.replace(/^test3_/, 'test4_');
+
+    const sourceSheet = ss.getSheetByName(sourceName);
+    const targetSheet = ss.getSheetByName(targetName);
+
+    if (!sourceSheet) {
+      Logger.log('[TEMP SYNC][SKIP] Missing source sheet: ' + sourceName);
+      return;
+    }
+    if (!targetSheet) {
+      Logger.log('[TEMP SYNC][SKIP] Missing target sheet: ' + targetName);
+      return;
+    }
+
+    const sourceData = sourceSheet.getDataRange().getValues();
+    if (!sourceData || sourceData.length === 0) {
+      Logger.log('[TEMP SYNC][SKIP] Source empty: ' + sourceName);
+      return;
+    }
+
+    targetSheet.clearContents();
+    targetSheet
+      .getRange(1, 1, sourceData.length, sourceData[0].length)
+      .setValues(sourceData);
+
+    Logger.log(
+      '[TEMP SYNC] ' +
+        sourceName +
+        ' → ' +
+        targetName +
+        ' | rows=' +
+        Math.max(0, sourceData.length - 1)
+    );
+  });
+
+  Logger.log('[TEMP SYNC] COMPLETE');
+}
+
+/**
+ * Safely clear log sheets for test isolation.
+ * Preserves header row; clears rows 2..N only.
+ */
+function csa_clear_test_logs_TEMP() {
+  if (_csa_abort_if_prod_TEMP_()) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const LOG_SHEETS_TO_CLEAR = [
+    'test3_error_log',
+    'test3_audit_log',
+    'test4_error_log',
+    'test4_audit_log'
+  ];
+
+  LOG_SHEETS_TO_CLEAR.forEach(function (sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      Logger.log('[TEMP CLEAR][SKIP] Sheet not found: ' + sheetName);
+      return;
+    }
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+
+    if (lastRow <= 1) {
+      Logger.log('[TEMP CLEAR] Already empty: ' + sheetName);
+      return;
+    }
+
+    sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+    Logger.log(
+      '[TEMP CLEAR] Cleared ' +
+        sheetName +
+        ' | rows=' +
+        (lastRow - 1)
+    );
+  });
+
+  Logger.log('[TEMP CLEAR] COMPLETE');
+}
