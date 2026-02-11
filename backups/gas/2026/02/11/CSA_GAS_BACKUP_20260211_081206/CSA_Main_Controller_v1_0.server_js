@@ -1,0 +1,25 @@
+/**
+ * @file_name: CSA_Main_Controller_v1_0.gs
+ * @title: CSA v1.0.0 Main Controller
+ * @version: v1.0.0
+ * @Org_date_time: 2025-12-20 12:23 MST
+ * @Last Updated: 2025-12-20 12:23 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV008
+ *
+ * @description:
+ *   Single WebApp entry point for CSA.
+ *   Delegates all requests to the CSA router.
+ *
+ * @notes:
+ *   - Exactly one doGet(e)
+ *   - No logic here
+ *   - Deterministic delegation only
+ */
+
+// Commented out per DEV035 do to two doGet's (other in Router)
+//
+// function doGet(e) {
+//   return CSA_Route_(e);
+// }
