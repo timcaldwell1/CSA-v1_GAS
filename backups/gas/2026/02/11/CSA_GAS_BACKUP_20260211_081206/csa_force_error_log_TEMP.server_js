@@ -1,0 +1,82 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_force_error_log_TEMP.gs
+ * @title: CSA TEMP — Controlled error_log Trigger (Prefix-Aware)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.1.0-TEMP
+ * @binder_type: QA Tooling (Temporary)
+ * @current_phase: DEV038
+ *
+ * @thread_lineage:
+ *   DEV037 (Observability Governance — Doc Only)
+ *   → DEV038 (Execution)
+ *
+ * @create_date: 2026-02-02 12:25 MST
+ * @last_updated: 2026-02-02 12:25 MST
+ * @authors: Tim Caldwell, ChatGPT (DEV038)
+ *
+ * // SAFE TO DELETE DURING Hygiene.
+ *
+ * --------------------------------------------------------------------
+ */
+
+function csa_force_error_log_TEMP() {
+  const props = PropertiesService.getScriptProperties();
+  const env = String(props.getProperty('CSA_ENV') || '').toUpperCase();
+  const prefix = String(props.getProperty('CSA_SHEET_PREFIX') || '').toLowerCase();
+
+  if (env === 'PROD') {
+    Logger.log('[TEMP][ABORT] CSA_ENV=PROD — refusing to write error_log');
+    return;
+  }
+
+  if (!prefix) {
+    Logger.log('[TEMP][FAIL] CSA_SHEET_PREFIX not set');
+    return;
+  }
+
+  const logSheetName = prefix + '_error_log';
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(logSheetName);
+  if (!sheet) {
+    Logger.log('[TEMP][FAIL] Sheet not found: ' + logSheetName);
+    return;
+  }
+
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const now = new Date();
+  const requestId = 'DEV038-' + now.getTime();
+
+  const valueByColumn = {
+    id: 'UNKNOWN',
+    timestamp: Utilities.formatDate(now, 'America/Phoenix', 'MM-dd-yyyy hh:mm:ss a z'),
+    error: 'SYSTEM',
+    incident_id: 'ERROR',
+    details: 'DEV038_FORCED_FAILURE',
+    error_details: 'UNKNOWN',
+    campus_attempted: 'UNKNOWN',
+    original_ts: '',
+    severity: 'ERROR',
+    env: env,
+    source: 'TEMP_HARNESS',
+    function_name: 'csa_force_error_log_TEMP',
+    message: 'DEV038 controlled failure — router not modified',
+    event_id: '',
+    event_ts_iso: now.toISOString(),
+    domain: 'QA',
+    stage: 'CONTROLLED_TEST',
+    outcome: 'INTENTIONAL',
+    request_id: requestId
+  };
+
+  const row = header.map(col =>
+    Object.prototype.hasOwnProperty.call(valueByColumn, col)
+      ? valueByColumn[col]
+      : ''
+  );
+
+  sheet.appendRow(row);
+  Logger.log('[TEMP] error_log row written to ' + logSheetName + ' | ' + requestId);
+}
