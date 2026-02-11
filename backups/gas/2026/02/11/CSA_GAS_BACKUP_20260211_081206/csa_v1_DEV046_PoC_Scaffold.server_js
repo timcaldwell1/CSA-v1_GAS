@@ -1,0 +1,230 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_v1_DEV046_PoC_Scaffold.gs
+ * @title: DEV046 PoC — Keyword, Risk, and Discard Sheet Scaffold
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v0.1 (PoC Scaffold)
+ * @binder_type: Planning / R&D (Non-Binding)
+ * @current_phase: DEV046 — Keyword & Risk Design
+ *
+ * @thread_lineage:
+ *   DEV045 (Keyword Planning)
+ *   → DEV046 (Risk + Keyword Greenfield)
+ *
+ * @create_date: 2026-02-08 06:30 MST
+ * @authors: Tim Caldwell → ChatGPT-DEV046
+ *
+ * ================ R&D Scoped Script ================
+ *            ====> NOT FOR PRODUCTION <======
+ *
+ * NOTES
+ * - Lower-case `csa_` prefix intentionally marks this file as:
+ *   • throw-away
+ *   • proof-of-concept only
+ *   • a hygiene delete candidate
+ *
+ * - This script MUST NOT be promoted, refactored, or merged
+ *   into any CSA_v1.x production code path.
+ *
+ * --------------------------------------------------------------------
+ * PURPOSE
+ * Creates a NEW spreadsheet with proposed sheet structures for:
+ *  - keyword_definitions
+ *  - incident_data
+ *  - discarded_events
+ *  - audit_log (placeholder)
+ *
+ * SAFETY
+ * - Does NOT read, write, or modify any existing CSA spreadsheets
+ * - Creates a brand-new file every run
+ * --------------------------------------------------------------------
+ */
+
+
+function CSA_DEV046_Create_PoC_Spreadsheet_() {
+  const ssName = 'CSA_DEV046_PoC_' + Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyyMMdd_HHmmss');
+  const ss = SpreadsheetApp.create(ssName);
+
+  createKeywordDefinitions_(ss);
+  createIncidentData_(ss);
+  createDiscardedEvents_(ss);
+  createAuditLog_(ss);
+
+  Logger.log('✅ DEV046 PoC spreadsheet created: ' + ss.getUrl());
+}
+
+/* ------------------------------------------------------------------ */
+/* KEYWORD DEFINITIONS                                                 */
+/* ------------------------------------------------------------------ */
+function createKeywordDefinitions_(ss) {
+  const sh = ss.getSheets()[0];
+  sh.setName('keyword_definitions');
+
+  const headers = [
+    'keyword',
+    'taxonomy_class',      // SIGNAL | EVENT_CONTEXT | SOFT_TAG | NEGATION
+    'base_weight',         // 0–10 (admin only)
+    'active',              // Y | N
+    'campus',              // e.g. Church | Synagogue | Mosque | *
+    'notes'
+  ];
+
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  const rows = [
+    // SIGNAL
+    ['shooting', 'SIGNAL', 5, 'Y', '*', 'Violent firearm incident'],
+    ['stabbing', 'SIGNAL', 4, 'Y', '*', 'Edged weapon attack'],
+    ['vehicle attack', 'SIGNAL', 5, 'Y', '*', 'Intentional vehicle harm'],
+    ['bomb threat', 'SIGNAL', 5, 'Y', 'Synagogue', 'High priority for this campus'],
+
+    // EVENT_CONTEXT
+    ['bake sale', 'EVENT_CONTEXT', 0, 'Y', '*', 'Neutral activity'],
+    ['fundraiser', 'EVENT_CONTEXT', 0, 'Y', '*', 'Neutral activity'],
+
+    // SOFT_TAG
+    ['church', 'SOFT_TAG', 0, 'Y', '*', 'Place descriptor'],
+    ['mosque', 'SOFT_TAG', 0, 'Y', '*', 'Place descriptor'],
+    ['synagogue', 'SOFT_TAG', 0, 'Y', '*', 'Place descriptor'],
+
+    // NEGATION
+    ['drill', 'NEGATION', 0, 'Y', '*', 'Training / exercise'],
+    ['hoax', 'NEGATION', 0, 'Y', '*', 'False report']
+  ];
+
+  sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* INCIDENT DATA                                                       */
+/* ------------------------------------------------------------------ */
+function createIncidentData_(ss) {
+  const sh = ss.insertSheet('incident_data');
+
+  const headers = [
+    'incident_id',
+    'incident_type',
+    'description',
+    'matched_keywords',
+    'risk_level',          // 0–10 (frozen)
+    'risk_label',          // INFO | LOW | ELEVATED | HIGH | CRITICAL
+    'campus',
+    'timestamp',           // write time (canonical)
+    'RawPubDate',          // untouched source string
+    'risk_model_version'
+  ];
+
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  const now = new Date();
+
+  const rows = [
+    // a) GOLDEN
+    [
+      'INC-001',
+      'Vehicle Attack',
+      'Car plows into bake sale injuring five people',
+      'vehicle attack,injured,bake sale',
+      10,
+      'CRITICAL',
+      'Church',
+      now,
+      'Published Sunday afternoon',
+      'DEV046-v0.1'
+    ],
+
+    // b) GOOD FAIL (clean discard later)
+    [
+      'INC-002',
+      'Community Event',
+      'Annual church fundraiser held peacefully',
+      'fundraiser,church',
+      '',
+      '',
+      'Church',
+      now,
+      'Posted yesterday',
+      'DEV046-v0.1'
+    ],
+
+    // c) FAIL-FAIL
+    [
+      'INC-003',
+      'Training Exercise',
+      'Emergency response drill conducted at mosque',
+      'drill,mosque',
+      '',
+      '',
+      'Mosque',
+      now,
+      'Updated Monday',
+      'DEV046-v0.1'
+    ],
+
+    // d) HARD-FAIL 🌋 (negation + signal collision)
+    [
+      'INC-004',
+      'Threat Report',
+      'Bomb threat reported, later confirmed hoax',
+      'bomb threat,hoax',
+      9,
+      'HIGH',
+      'Synagogue',
+      now,
+      'Breaking news',
+      'DEV046-v0.1'
+    ]
+  ];
+
+  sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* DISCARDED EVENTS                                                    */
+/* ------------------------------------------------------------------ */
+function createDiscardedEvents_(ss) {
+  const sh = ss.insertSheet('discarded_events');
+
+  const headers = [
+    'incident_id',
+    'stage',               // KEYWORD | GEOFENCE
+    'reason_code',         // NO_SIGNAL | NEGATION_NO_SIGNAL | NO_ZONE_MATCH
+    'trigger',
+    'campus',
+    'timestamp'
+  ];
+
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  const now = new Date();
+
+  const rows = [
+    // GOOD FAIL
+    ['INC-002', 'KEYWORD', 'NO_SIGNAL', 'fundraiser', 'Church', now],
+
+    // FAIL-FAIL
+    ['INC-003', 'KEYWORD', 'NEGATION_NO_SIGNAL', 'drill', 'Mosque', now]
+  ];
+
+  sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* AUDIT LOG (PLACEHOLDER)                                             */
+/* ------------------------------------------------------------------ */
+function createAuditLog_(ss) {
+  const sh = ss.insertSheet('audit_log');
+
+  const headers = [
+    'audit_id',
+    'incident_id',
+    'action',
+    'notes',
+    'actor',
+    'timestamp'
+  ];
+
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  // intentionally empty — PoC placeholder
+}
