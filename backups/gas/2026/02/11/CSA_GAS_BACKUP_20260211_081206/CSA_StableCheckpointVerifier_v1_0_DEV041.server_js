@@ -1,0 +1,353 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_StableCheckpointVerifier_v1_0_DEV041.gs
+ * @title: CSA Stable Checkpoint Integrity Verifier (Baseline + Diff)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.0.0-DEV041
+ * @binder_type: DEV Tooling (Non-runtime; Read-only verification)
+ * @current_phase: Stable Checkpoint Verification / Consolidation Support
+ *
+ * @thread_lineage:
+ *   DEV040 (Governance: no behavior change)
+ *   → DEV041 (Verification Tooling Only)
+ *
+ * @create_date: 2026-02-09 19:46 MST
+ * @last_updated: 2026-02-09 19:46 MST
+ * @authors: DEV041
+ *
+ * Notes:
+ * - Designed to support surgical consolidation by verifying integrity repeatedly.
+ * - Does NOT attempt to read project source files (Apps Script API not used).
+ * - Verifies observable surface area:
+ *   - Script ID + Script Timezone
+ *   - Selected Script Properties (with secret hashing)
+ *   - Function inventory (global function names)
+ *   - Spreadsheet schema fingerprints (header row hashes)
+ *   - Installed triggers list (names/types)
+ * --------------------------------------------------------------------
+ */
+
+/** Stored baseline JSON (in Script Properties) */
+var CSA_DEV041_BASELINE_KEY = 'CSA_DEV041_STABLE_CHECKPOINT_BASELINE_JSON';
+
+/** Optional metadata anchor from DEV040 scope; informational only. */
+var CSA_DEV041_SCOPE_BACKUP_ID = 'CSA_GAS_BACKUP_20260201_193626';
+
+/**
+ * CAPTURE baseline (one-time per checkpoint).
+ * Side-effect: writes baseline JSON to Script Properties under CSA_DEV041_BASELINE_KEY.
+ */
+function CSA_DEV041_CaptureStableCheckpointBaseline_() {
+  var now = new Date();
+  var baseline = CSA_DEV041_BuildSignature_();
+  baseline.meta = baseline.meta || {};
+  baseline.meta.captured_at_mst = CSA_DEV041_FormatMST_(now);
+  baseline.meta.scope_backup_id = CSA_DEV041_SCOPE_BACKUP_ID;
+
+  PropertiesService.getScriptProperties().setProperty(
+    CSA_DEV041_BASELINE_KEY,
+    JSON.stringify(baseline)
+  );
+
+  Logger.log('[DEV041][BASELINE][CAPTURED] ' + baseline.meta.captured_at_mst);
+  Logger.log('[DEV041][BASELINE][INFO] Stored in Script Properties key=' + CSA_DEV041_BASELINE_KEY);
+  return { ok: true, captured_at_mst: baseline.meta.captured_at_mst };
+}
+
+/**
+ * VERIFY against stored baseline.
+ * No side-effects (read-only).
+ */
+function CSA_DEV041_VerifyStableCheckpoint_() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty(CSA_DEV041_BASELINE_KEY);
+
+  if (!raw) {
+    Logger.log('[DEV041][VERIFY] No baseline found. Run CSA_DEV041_CaptureStableCheckpointBaseline_() first.');
+    // Still return a computed signature so it can be manually compared if desired.
+    return {
+      ok: false,
+      reason: 'NO_BASELINE',
+      current_signature: CSA_DEV041_BuildSignature_()
+    };
+  }
+
+  var baseline = JSON.parse(raw);
+  var current = CSA_DEV041_BuildSignature_();
+
+  var mismatches = [];
+  CSA_DEV041_Diff_(baseline, current, '', mismatches);
+
+  var result = {
+    ok: mismatches.length === 0,
+    mismatch_count: mismatches.length,
+    mismatches: mismatches,
+    baseline_captured_at_mst: (baseline.meta && baseline.meta.captured_at_mst) || 'UNKNOWN',
+    verified_at_mst: CSA_DEV041_FormatMST_(new Date())
+  };
+
+  if (result.ok) {
+    Logger.log('[DEV041][VERIFY][PASS] Baseline matches current. Verified at ' + result.verified_at_mst);
+  } else {
+    Logger.log('[DEV041][VERIFY][FAIL] mismatch_count=' + result.mismatch_count + ' Verified at ' + result.verified_at_mst);
+    mismatches.slice(0, 50).forEach(function(m) { Logger.log(' - ' + m); }); // cap log spam
+    if (mismatches.length > 50) Logger.log(' - (additional mismatches omitted from log)');
+  }
+
+  return result;
+}
+
+/**
+ * Build the current checkpoint signature (read-only).
+ */
+function CSA_DEV041_BuildSignature_() {
+  var sig = {};
+
+  // Identity
+  sig.identity = {
+    script_id: ScriptApp.getScriptId(),
+    script_timezone: Session.getScriptTimeZone()
+  };
+
+  // Script properties (selected + secret-safe)
+  sig.properties = CSA_DEV041_CollectStableProperties_();
+
+  // Function inventory (what exists in global scope)
+  sig.functions = CSA_DEV041_CollectFunctionInventory_();
+
+  // Spreadsheet schema fingerprints (header row hashes)
+  sig.spreadsheet = CSA_DEV041_CollectSpreadsheetSchema_();
+
+  // Triggers (installed triggers only)
+  sig.triggers = CSA_DEV041_CollectTriggers_();
+
+  // Meta
+  sig.meta = {
+    generated_at_mst: CSA_DEV041_FormatMST_(new Date())
+  };
+
+  return sig;
+}
+
+/**
+ * Collect “stable-ish” properties.
+ * - Includes CSA_* and GITHUB_*.
+ * - Excludes known volatile keys that are expected to change.
+ * - Hashes secrets (PAT/TOKEN/SECRET) to avoid exposing sensitive values.
+ */
+function CSA_DEV041_CollectStableProperties_() {
+  var all = PropertiesService.getScriptProperties().getProperties();
+
+  var includePrefixes = ['CSA_', 'GITHUB_'];
+  var excludeKeys = {
+    // Volatile by nature / operational timestamps
+    'CSA_HISTORY_TOUCH': true,
+    // Baseline storage itself
+    'CSA_DEV041_STABLE_CHECKPOINT_BASELINE_JSON': true
+  };
+
+  var out = {};
+  Object.keys(all).sort().forEach(function(k) {
+    if (excludeKeys[k]) return;
+
+    var included = includePrefixes.some(function(p) { return k.indexOf(p) === 0; });
+    if (!included) return;
+
+    var v = String(all[k]);
+
+    // Secret-safe handling
+    if (CSA_DEV041_IsSecretKey_(k)) {
+      out[k] = { hashed: true, sha256_12: CSA_DEV041_Sha256_12_(v), length: v.length };
+    } else {
+      out[k] = { hashed: false, value: v };
+    }
+  });
+
+  return out;
+}
+
+function CSA_DEV041_IsSecretKey_(key) {
+  var k = String(key).toUpperCase();
+  return (k.indexOf('PAT') >= 0 || k.indexOf('TOKEN') >= 0 || k.indexOf('SECRET') >= 0 || k.indexOf('KEY') >= 0);
+}
+
+function CSA_DEV041_Sha256_12_(s) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8);
+  var hex = bytes.map(function(b) {
+    var v = (b < 0 ? b + 256 : b);
+    return ('0' + v.toString(16)).slice(-2);
+  }).join('');
+  return hex.slice(0, 12);
+}
+
+/**
+ * Collect function inventory from global scope.
+ * Includes:
+ *  - CSA_* and csa_* and DEV* and _* (internal helpers)
+ * Excludes:
+ *  - Common host objects
+ */
+function CSA_DEV041_CollectFunctionInventory_() {
+  var names = [];
+  var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+
+  Object.getOwnPropertyNames(g).forEach(function(n) {
+    try {
+      if (typeof g[n] !== 'function') return;
+
+      // Include patterns aligned to CSA naming conventions and known helpers
+      if (
+        n.indexOf('CSA_') === 0 ||
+        n.indexOf('csa_') === 0 ||
+        n.indexOf('DEV') === 0 ||
+        n.indexOf('_') === 0 ||
+        n.indexOf('onOpen') === 0 ||
+        n.indexOf('doGet') === 0
+      ) {
+        names.push(n);
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
+
+  names.sort();
+  return {
+    count: names.length,
+    names: names
+  };
+}
+
+/**
+ * Spreadsheet schema fingerprinting:
+ * - Opens CSA_SPREADSHEET_ID if present.
+ * - Records each sheet's name + sheetId + header-row hash.
+ * - Does NOT record row counts (data changes are expected).
+ */
+function CSA_DEV041_CollectSpreadsheetSchema_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+
+  if (!ssId) {
+    return { ok: false, reason: 'CSA_SPREADSHEET_ID_MISSING' };
+  }
+
+  var ss;
+  try {
+    ss = SpreadsheetApp.openById(ssId);
+  } catch (e) {
+    return { ok: false, reason: 'OPEN_BY_ID_FAILED', message: String(e) };
+  }
+
+  var sheets = ss.getSheets();
+  var sheetSigs = sheets.map(function(sh) {
+    var header = [];
+    try {
+      // Read a bounded header range (first row, up to 60 columns)
+      var vals = sh.getRange(1, 1, 1, 60).getValues();
+      header = (vals && vals[0]) ? vals[0].map(function(x) { return String(x || '').trim(); }) : [];
+    } catch (e) {
+      header = ['<HEADER_READ_FAILED>'];
+    }
+
+    var headerJoined = header.join('|');
+    return {
+      name: sh.getName(),
+      sheet_id: sh.getSheetId(),
+      header_sha256_12: CSA_DEV041_Sha256_12_(headerJoined)
+    };
+  });
+
+  // Stable ordering by sheet name
+  sheetSigs.sort(function(a, b) {
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+
+  return {
+    ok: true,
+    spreadsheet_id: ssId,
+    spreadsheet_name: ss.getName(),
+    spreadsheet_timezone: ss.getSpreadsheetTimeZone(),
+    sheets: sheetSigs
+  };
+}
+
+/**
+ * Installed trigger inventory.
+ */
+function CSA_DEV041_CollectTriggers_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var out = triggers.map(function(t) {
+    var handler = '';
+    try { handler = t.getHandlerFunction(); } catch (e) {}
+    return {
+      handler: handler,
+      event_type: String(t.getEventType()),
+      source: String(t.getTriggerSource())
+    };
+  });
+
+  // Stable order by handler name
+  out.sort(function(a, b) {
+    return a.handler < b.handler ? -1 : (a.handler > b.handler ? 1 : 0);
+  });
+
+  return { count: out.length, triggers: out };
+}
+
+/**
+ * Deep diff with human-readable mismatch messages.
+ */
+function CSA_DEV041_Diff_(a, b, path, mismatches) {
+  // Handle primitives
+  var aIsObj = a && typeof a === 'object';
+  var bIsObj = b && typeof b === 'object';
+
+  if (!aIsObj || !bIsObj) {
+    if (String(a) !== String(b)) {
+      mismatches.push((path || '<root>') + ' : "' + String(a) + '" != "' + String(b) + '"');
+    }
+    return;
+  }
+
+  // Arrays
+  var aIsArr = Array.isArray(a);
+  var bIsArr = Array.isArray(b);
+  if (aIsArr || bIsArr) {
+    if (!(aIsArr && bIsArr)) {
+      mismatches.push((path || '<root>') + ' : type mismatch (array vs non-array)');
+      return;
+    }
+    if (a.length !== b.length) {
+      mismatches.push((path || '<root>') + ' : array length ' + a.length + ' != ' + b.length);
+    }
+    var len = Math.min(a.length, b.length);
+    for (var i = 0; i < len; i++) {
+      CSA_DEV041_Diff_(a[i], b[i], path + '[' + i + ']', mismatches);
+    }
+    return;
+  }
+
+  // Objects
+  var aKeys = Object.keys(a).sort();
+  var bKeys = Object.keys(b).sort();
+
+  // Missing/extra keys
+  aKeys.forEach(function(k) {
+    if (bKeys.indexOf(k) < 0) mismatches.push((path ? path + '.' : '') + k + ' : missing in current');
+  });
+  bKeys.forEach(function(k) {
+    if (aKeys.indexOf(k) < 0) mismatches.push((path ? path + '.' : '') + k + ' : extra in current');
+  });
+
+  // Compare shared keys
+  aKeys.forEach(function(k) {
+    if (bKeys.indexOf(k) < 0) return;
+    var nextPath = path ? path + '.' + k : k;
+    CSA_DEV041_Diff_(a[k], b[k], nextPath, mismatches);
+  });
+}
+
+function CSA_DEV041_FormatMST_(d) {
+  return Utilities.formatDate(d, 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST';
+}
