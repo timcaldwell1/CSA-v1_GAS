@@ -1,0 +1,39 @@
+/**
+ * ============================================================
+ * File: z_FORCE_AUTH.gs
+ * Product: CSA_v1
+ * Product Version: v1.1.0
+ * Purpose: FORCE INITIAL AUTHORIZATION PROMPT
+ * Phase: DEV028 (Temporary Utility)
+ * Created: 2026-01-21 MST
+ * Authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV028)
+ *
+ * ------------------------------------------------------------
+ * WHAT THIS FILE DOES
+ * ------------------------------------------------------------
+ * - Forces Google Apps Script to request OAuth permissions
+ * - Unblocks UI permissions required for Ui.showSidebar()
+ * - Does NOT write to sheets
+ * - Does NOT write to properties
+ * - Safe to delete after successful authorization
+ *
+ * ------------------------------------------------------------
+ * HOW TO USE (IMPORTANT)
+ * ------------------------------------------------------------
+ * 1. Save this file
+ * 2. Select function: CSA_ForceAuth_
+ * 3. Click ▶ Run
+ * 4. APPROVE the permission dialog
+ * 5. After approval, delete this file
+ * ============================================================
+ */
+
+function CSA_ForceAuth_() {
+  // This line forces Google to request permissions.
+  // It is intentionally simple and safe.
+  const email = Session.getActiveUser().getEmail();
+  Logger.log('Auth granted for user: ' + email);
+  return email;
+}
