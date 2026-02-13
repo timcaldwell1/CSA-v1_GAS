@@ -1,0 +1,172 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_ToolRunner_DEV041.gs
+ * @title: CSA ToolRunner (Canonical Operator Surface)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.0.3-DEV042
+ * @binder_type: DEV Tooling (Non-runtime; Operator-controlled entrypoints)
+ * @current_phase: Governance Tightening / ToolRunner-only Execution Surface
+ *
+ * @thread_lineage:
+ *   DEV040 (Governance baseline)
+ *   → DEV041 (Single canonical ToolRunner + verifier)
+ *   → DEV042 (QD containment + read-only reporting)
+ *
+ * @create_date: 2026-02-11 19:25 MST
+ * @last_updated: 2026-02-13 04:58 MST
+ * @authors: DEV041, DEV042
+ *
+ * Notes:
+ * - This file is the ONLY approved editor-run execution surface.
+ * - No onOpen(), no menus, no triggers created here.
+ * - Tools added in DEV042 are READ-ONLY (reporting only).
+ * --------------------------------------------------------------------
+ */
+
+
+/* ============================================================
+   SECTION 1 — Stable Checkpoint Control
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_DEV041_VerifyStableCheckpoint_();
+}
+
+
+/* ============================================================
+   SECTION 2 — DEV046 PoC
+============================================================ */
+
+function RUN_DEV046_Create_PoC_Spreadsheet() {
+  if (typeof CSA_DEV046_Create_PoC_Spreadsheet_ === 'function') {
+    return CSA_DEV046_Create_PoC_Spreadsheet_();
+  }
+  Logger.log('[ToolRunner][DEV046] Missing function: CSA_DEV046_Create_PoC_Spreadsheet_');
+  return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV046_Create_PoC_Spreadsheet_' };
+}
+
+
+/* ============================================================
+   SECTION 3 — DEV042 Diagnostics (Controlled Entry)
+============================================================ */
+
+function RUN_DEV042_VERIFY_DataBridge() {
+  return CSA_DEV042_CallIfExists_(
+    'CSA_VERIFY_DataBridge_',
+    [],
+    '[ToolRunner][DEV042][VERIFY] DataBridge'
+  );
+}
+
+function RUN_DEV042_ContainerBinding_Proof() {
+  return CSA_DEV042_CallIfExists_(
+    'CSA_ProveContainerBinding_',
+    [],
+    '[ToolRunner][DEV042][DIAG] Container Binding Proof'
+  );
+}
+
+
+/* ============================================================
+   SECTION 4 — DEV042 Read-Only Reporting (Binder/Handoff)
+============================================================ */
+
+/**
+ * Dumps Script Properties + Function Inventory to Logger (SAFE/REDACTED by default).
+ * Returns a small summary object plus the full report text.
+ */
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'REDACTED',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_DEV042_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+/**
+ * Generates a Binder-ready read-only report (markdown + JSON), returns it (no sheet writes).
+ * SAFE/REDACTED by default.
+ */
+function RUN_DEV042_Generate_Binder_ReadOnly_Report_REDACTED() {
+  return RUN_DEV042_Dump_Props_And_Functions_REDACTED();
+}
+
+/**
+ * OPTIONAL / HIGH-RISK: Raw dump (includes secret values). Use only when needed.
+ * Kept available for operator control, but NOT binder-safe.
+ */
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'RAW',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_DEV042_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT][RAW] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+
+/* ============================================================
+   SECTION 5 — Internal Helpers (ToolRunner-only)
+============================================================ */
+
+function CSA_DEV042_CallIfExists_(fnName, args, logPrefix) {
+  try {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    var fn = g[fnName];
+
+    if (typeof fn !== 'function') {
+      Logger.log((logPrefix || '[ToolRunner]') + ' Missing function: ' + fnName);
+      return { ok: false, reason: 'MISSING_FUNCTION', missing: fnName };
+    }
+
+    Logger.log((logPrefix || '[ToolRunner]') + ' Running: ' + fnName);
+    var result = fn.apply(null, args || []);
+    Logger.log((logPrefix || '[ToolRunner]') + ' Completed: ' + fnName);
+
+    return { ok: true, function: fnName, result: result };
+
+  } catch (e) {
+    Logger.log((logPrefix || '[ToolRunner]') + ' ERROR in ' + fnName + ': ' + String(e));
+    return { ok: false, reason: 'EXCEPTION', function: fnName, error: String(e) };
+  }
+}
+
+/**
+ * Logger has line/size limits; this prints large text safely in chunks.
+ */
+function CSA_DEV042_LogInChunks_(text, prefix) {
+  prefix = prefix || '';
+  var s = String(text || '');
+  if (!s) {
+    Logger.log(prefix + '(empty)');
+    return;
+  }
+
+  var CHUNK = 3500;
+  for (var i = 0; i < s.length; i += CHUNK) {
+    Logger.log(prefix + s.substring(i, i + CHUNK));
+  }
+}
