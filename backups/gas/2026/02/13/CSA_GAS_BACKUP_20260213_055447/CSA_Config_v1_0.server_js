@@ -1,0 +1,56 @@
+/**
+ * @file CSA_Config_v1_0.gs
+ * @description Central configuration access for CSA runtime, OBI, and validation
+ * @version v1.0.1
+ * @env CSA
+ * @date 2025-12-24
+ *
+ * CHANGELOG:
+ * - v1.0.1: Removed all runtime config caching. Script Properties are read
+ *           on every invocation to ensure correct behavior in GAS WebApps.
+ *
+ * AUTHORITATIVE RULES:
+ * - ScriptProperties ONLY (no UserProperties, no DocumentProperties)
+ * - No global state
+ * - No memoization
+ * - Safe for deployed WebApp execution
+ */
+
+/**
+ * Returns a fully validated configuration object for CSA.
+ * Must be called inside runtime execution paths (doGet, data bridge).
+ *
+ * @returns {Object} cfg
+ * @throws {Error} FATAL if any required Script Property is missing
+ */
+function CSA_GetConfig_() {
+  return {
+    CSA_PRODUCT_NAME: getRequiredProperty_('CSA_PRODUCT_NAME'),
+    CSA_ENV: getRequiredProperty_('CSA_ENV'),
+    CSA_MOCK_MODE: getRequiredProperty_('CSA_MOCK_MODE'),
+    CSA_CAMPUS_NAME: getRequiredProperty_('CSA_CAMPUS_NAME'),
+    CSA_SPREADSHEET_ID: getRequiredProperty_('CSA_SPREADSHEET_ID')
+  };
+}
+
+/**
+ * Retrieves a required Script Property from ScriptProperties.
+ *
+ * @param {string} key
+ * @returns {string} value
+ * @throws {Error} FATAL if property is missing or empty
+ */
+function getRequiredProperty_(key) {
+  if (!key) {
+    throw new Error('FATAL: getRequiredProperty_ called without key');
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const value = props.getProperty(key);
+
+  if (value === null || value === undefined || value === '') {
+    throw new Error('Missing required Script Property: ' + key);
+  }
+
+  return value;
+}
