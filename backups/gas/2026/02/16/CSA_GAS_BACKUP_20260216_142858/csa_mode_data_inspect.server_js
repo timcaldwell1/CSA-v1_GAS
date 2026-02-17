@@ -1,0 +1,66 @@
+/**
+ * @file_name: csa-v1_p1_1_mode_data_inspect.gs
+ *
+ * @title: DEV017 P1.1 — ?mode=data Contract Inspection (Read-Only)
+ * @version: v0.2
+ * @Org_date_time: 2026-01-11
+ * @Last Updated: 2026-01-11 11:24 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV014,
+ *   ChatGPT, DEV017
+ * 
+ * @description:
+ *   Read-only diagnostic to confirm the effective return contract
+ *   of ?mode=data. No logic, routing, or property changes.
+ *
+ * @notes:
+ *   - READ ONLY
+ *   - No routing changes
+ *   - No property reads/writes
+ *   - No mutation of returned data
+ *   - Lowercase filename by hygiene rule
+ */
+
+// ---- EDITOR VISIBILITY ANCHOR (NO-OP) ----
+function csa_v1_editor_anchor_() {
+  return;
+}
+// -----------------------------------------
+
+function csa_v1_p1_1_mode_data_inspect_() {
+  Logger.log("===== DEV017 P1.1 MODE=DATA CONTRACT INSPECTION =====");
+
+  const result = CSA_GetIncidentData_(); // existing PROD data path
+
+  Logger.log("Typeof result: " + typeof result);
+  Logger.log(
+    "Constructor: " +
+      (result && result.constructor ? result.constructor.name : "N/A")
+  );
+
+  if (typeof result === "object" && result !== null) {
+    Logger.log("Top-level keys: " + Object.keys(result).join(", "));
+    Logger.log("Campus: " + result.campus);
+    Logger.log("Count: " + result.count);
+
+    if (Array.isArray(result.incidents)) {
+      Logger.log("Incidents: ARRAY");
+      Logger.log("Incident count: " + result.incidents.length);
+
+      if (result.incidents.length > 0) {
+        const sample = result.incidents[0];
+        Logger.log("Sample keys: " + Object.keys(sample).join(", "));
+        Logger.log("Sample id/hash: " + sample.id_a + " / " + sample.id_b);
+        Logger.log("Sample lat/lng: " + sample.latitude + ", " + sample.longitude);
+        Logger.log("Sample timestamp: " + sample.timestamp);
+      }
+    }
+  } else if (typeof result === "string") {
+    Logger.log("Result is STRING");
+    Logger.log("Length: " + result.length);
+    Logger.log(result.substring(0, 300));
+  }
+
+  Logger.log("===== END DEV017 P1.1 INSPECTION =====");
+}
