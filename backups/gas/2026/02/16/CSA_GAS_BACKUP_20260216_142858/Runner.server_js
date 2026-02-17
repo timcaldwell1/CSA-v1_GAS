@@ -1,0 +1,14 @@
+/**
+ * DEV-only. Creates the PoC spreadsheet scaffold.
+ * Safe: No PROD writes.
+ */
+function RUN_DEV046_Create_PoC_Spreadsheet() {
+  CSA_DEV046_Create_PoC_Spreadsheet_();
+}
+/**
+ * PROD-safe, read-only.
+ * Verifies current project state against baseline.
+ */
+function RUN_PROD_VerifyStableCheckpoint() {
+  CSA_DEV041_VerifyStableCheckpoint_();
+}
