@@ -93,65 +93,92 @@ Secrets such as PAT values are excluded from structural drift detection.
 
 ---
 
-# DEV042 Governance Outcomes
 
-The following were removed or isolated:
+## Backup & Source Control — Google Apps Script Snapshot Push
 
-- QD scratch tooling
-- Abandoned backup experiments
-- One-time setup initializers
-- Sheets menu surfaces
-- Property mutators not required for PoC
-- Uncontrolled execution paths
+### Overview
 
-Remaining system is lean and deterministic.
+CSA_v1 includes an operator-controlled backup mechanism that:
 
----
-
-# Security Notes
-
-- Secrets are never committed to this repository.
-- Verifier redacts secret values.
-- GitHub PAT is operational and not part of structural fingerprinting.
-- Binder-safe reporting tools generate redacted output.
-
----
-
-# Repository Structure
-
-This repository contains exported GAS source snapshots under:
+1. Creates a Drive snapshot folder (`CSA_GAS_BACKUP_YYYYMMDD_HHMMSS`)
+2. Pushes the contents to GitHub under:
 
 ```
-
-backups/gas/YYYY/MM/DD/
-
+backups/gas/YYYY/MM/DD/CSA_GAS_BACKUP_YYYYMMDD_HHMMSS/
 ```
 
-Each snapshot represents a stable export at a specific checkpoint.
+This preserves full source history outside Apps Script versioning.
+
+This tool does **not** modify ingest logic or runtime behavior.
 
 ---
 
-# Installation / Deployment
+### Required Script Properties
 
-This repository does not auto-deploy.
-
-The live system is a container-bound Google Apps Script project.
-
-Deployment steps are controlled manually through ToolRunner and Apps Script Editor.
+| Property                   | Description                              |
+| -------------------------- | ---------------------------------------- |
+| `GITHUB_PAT`               | Fine-grained Personal Access Token       |
+| `GITHUB_REPO`              | e.g., `timcaldwell1/CSA-v1_GAS`          |
+| `GITHUB_BRANCH`            | e.g., `main`                             |
+| `GITHUB_BASE_PATH`         | e.g., `backups/gas`                      |
+| `CSA_GAS_BACKUP_FOLDER_ID` | Drive folder containing snapshot folders |
 
 ---
 
-# Scope
+### Required GitHub Token Permissions (Fine-Grained PAT)
 
-CSA_v1 is currently a Proof of Concept focused on:
+Repository access:
 
-- Incident ingestion from Sheets
-- Time normalization
-- Map + card rendering
-- Observability logging
-- Governance integrity
+* Select repository: `CSA-v1_GAS`
 
-It is not yet a production multi-campus deployment system.
+Repository permissions:
+
+* **Contents → Read and write**
+* Metadata → Read
+
+Other permissions (Actions, Admin, etc.) are not required for contents writes.
+
+If the token lacks `Contents: write`, GitHub will return:
+
+```
+403 Resource not accessible by personal access token
+```
+
+---
+
+### ToolRunner Entry Points
+
+| Function                                      | Purpose                     |
+| --------------------------------------------- | --------------------------- |
+| `RUN_GITHUB_AuthTest_DEV049()`                | Verify token authentication |
+| `RUN_GITHUB_DiagnosePermissions_DEV049()`     | Print permission headers    |
+| `RUN_GITHUB_PushLatestDriveSnapshot_DEV049()` | Push latest snapshot        |
+
+---
+
+### Successful Push Log Example
+
+```
+[GITHUB][PUSH] OK backups/gas/2026/02/16/CSA_GAS_BACKUP_20260216_142858/appsscript.json (CREATE)
+[GITHUB][PUSH] DONE pushed=53.0 folder=CSA_GAS_BACKUP_20260216_142858
+[ToolRunner][GITHUB][PUSH] Completed: CSA_GitHub_Push_Latest_GAS_Snapshot_To_GitHub_DEV049_
+```
+
+Interpretation:
+
+* All files written successfully
+* No 403
+* No SHA mismatch
+* No partial failure
+
+---
+
+### Governance Notes
+
+* Snapshots are append-only in GitHub.
+* Files are created or updated using SHA reconciliation.
+* No runtime CSA ingest logic is affected.
+* This tool exists strictly for operational backup control.
 
 ---
 
