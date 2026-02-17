@@ -1,0 +1,230 @@
+/***************************************************************************************
+ * Script Name: CSA_DEV047_SheetSetBuilder_v1_0.gs
+ * Title: DEV047 — Sheet Set Builder (Create test2_* from test3_* baseline)
+ * Product: CSA_v1 — Church Safety Alerts
+ * Script Type: Google Apps Script (.gs)
+ * Script Version: v1.0
+ * Status: ACTIVE — PoC Support Tooling
+ * Effective Date/Time (MST): 2026-02-13
+ * Thread Lineage: DEV045 → DEV046 → DEV047
+ * Supersedes: —
+ * Authors: Tim Caldwell (Product / Governor), DEV047
+ *
+ * Purpose
+ * - Creates a new sheet prefix set (e.g., test2_*) for DEV047 ingestion harness usage.
+ * - Clones schema from existing test3_* sheets where beneficial (safety_zones, error_log, audit_log).
+ * - Creates DEV047-specific sheets with contract headers:
+ *    <prefix>_keyword_definitions
+ *    <prefix>_incident_data
+ *    <prefix>_discarded_events
+ *    <prefix>_poc_ingest_queue
+ *
+ * Notes
+ * - Does NOT delete anything.
+ * - Default behavior is SKIP if target sheet already exists.
+ * - Adds Logger.log instrumentation for GAS execution logs.
+ ***************************************************************************************/
+
+function CSA_DEV047_CreateSheetSet_(targetPrefix, options) {
+  options = options || {};
+  var sourcePrefix = String(options.sourcePrefix || "test3"); // baseline to clone from
+  var mode = String(options.mode || "SKIP_IF_EXISTS"); // SKIP_IF_EXISTS | RESET_HEADERS
+  var setScriptPropertyPrefix = Boolean(options.setScriptPropertyPrefix || false);
+  var seedKeywords = (options.seedKeywords === false) ? false : true;
+
+  targetPrefix = String(targetPrefix || "").trim();
+  if (!targetPrefix) throw new Error("CSA_DEV047_CreateSheetSet_: targetPrefix is required (e.g., 'test2').");
+
+  var ss = CSA_DEV047_SB__getSpreadsheet_();
+
+  Logger.log("[DEV047][SHEETSET] START targetPrefix=" + targetPrefix + " sourcePrefix=" + sourcePrefix + " mode=" + mode);
+
+  var result = {
+    ok: true,
+    targetPrefix: targetPrefix,
+    sourcePrefix: sourcePrefix,
+    mode: mode,
+    created: [],
+    updated: [],
+    skipped: [],
+    warnings: []
+  };
+
+  // 1) Clone baseline sheets where we want exact schema continuity.
+  CSA_DEV047_SB__cloneOrCreate_(ss, sourcePrefix + "_safety_zones", targetPrefix + "_safety_zones", mode, result, {
+    fallbackHeaders: ["zone_name", "center_lat", "center_lon", "radius_m", "active"] // best-effort fallback
+  });
+
+  CSA_DEV047_SB__cloneOrCreate_(ss, sourcePrefix + "_error_log", targetPrefix + "_error_log", mode, result, {
+    fallbackHeaders: ["timestamp", "env", "source", "severity", "error_name", "function_name", "message", "error_details"]
+  });
+
+  CSA_DEV047_SB__cloneOrCreate_(ss, sourcePrefix + "_audit_log", targetPrefix + "_audit_log", mode, result, {
+    fallbackHeaders: ["timestamp", "source", "status", "message"]
+  });
+
+  // 2) Create DEV047 harness sheets (contract headers).
+  CSA_DEV047_SB__createOrResetSheet_(ss, targetPrefix + "_keyword_definitions", mode, result, function (sh) {
+    var headers = ["keyword", "taxonomy_class", "base_weight", "active", "campus", "notes"];
+    CSA_DEV047_SB__setHeader_(sh, headers);
+    if (seedKeywords) CSA_DEV047_SB__seedKeywords_(sh);
+  });
+
+  CSA_DEV047_SB__createOrResetSheet_(ss, targetPrefix + "_incident_data", mode, result, function (sh) {
+    // Must match DEV047 harness header verification (exact order).
+    var headers = [
+      "incident_id",
+      "incident_type",
+      "description",
+      "matched_keywords",
+      "risk_level",
+      "risk_label",
+      "campus",
+      "timestamp",
+      "RawPubDate",
+      "risk_model_version"
+    ];
+    CSA_DEV047_SB__setHeader_(sh, headers);
+  });
+
+  CSA_DEV047_SB__createOrResetSheet_(ss, targetPrefix + "_discarded_events", mode, result, function (sh) {
+    var headers = ["incident_id", "stage", "reason_code", "trigger", "campus", "timestamp"];
+    CSA_DEV047_SB__setHeader_(sh, headers);
+  });
+
+  CSA_DEV047_SB__createOrResetSheet_(ss, targetPrefix + "_poc_ingest_queue", mode, result, function (sh) {
+    var headers = ["csv_text_paste_here"];
+    CSA_DEV047_SB__setHeader_(sh, headers);
+    // Keep sheet simple: user pastes full CSV into A2 or A1; harness reads A1 by default in DEV047.
+    sh.getRange(2, 1).setValue(""); // blank row for paste convenience
+  });
+
+  // 3) Optionally set Script Property (safe order: only after sheet creation).
+  if (setScriptPropertyPrefix) {
+    PropertiesService.getScriptProperties().setProperty("CSA_SHEET_PREFIX", targetPrefix);
+    Logger.log("[DEV047][SHEETSET] Script Property CSA_SHEET_PREFIX set to: " + targetPrefix);
+    result.updated.push("ScriptProperty:CSA_SHEET_PREFIX=" + targetPrefix);
+  }
+
+  Logger.log("[DEV047][SHEETSET] DONE created=" + result.created.length + " updated=" + result.updated.length + " skipped=" + result.skipped.length);
+  return result;
+}
+
+/** Convenience wrappers **/
+function CSA_DEV047_Create_Test2_SheetSet_Only_() {
+  return CSA_DEV047_CreateSheetSet_("test2", { sourcePrefix: "test3", mode: "SKIP_IF_EXISTS", setScriptPropertyPrefix: false, seedKeywords: true });
+}
+
+function CSA_DEV047_Create_Test2_SheetSet_AND_SetPrefix_() {
+  return CSA_DEV047_CreateSheetSet_("test2", { sourcePrefix: "test3", mode: "SKIP_IF_EXISTS", setScriptPropertyPrefix: true, seedKeywords: true });
+}
+
+/* =========================
+ * Internal Helpers (SheetSetBuilder)
+ * ========================= */
+
+function CSA_DEV047_SB__getSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+  if (ssId && String(ssId).trim()) return SpreadsheetApp.openById(String(ssId).trim());
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_DEV047_SB__sheetExists_(ss, name) {
+  return Boolean(ss.getSheetByName(name));
+}
+
+function CSA_DEV047_SB__cloneOrCreate_(ss, sourceName, targetName, mode, result, opts) {
+  opts = opts || {};
+  var source = ss.getSheetByName(sourceName);
+  var target = ss.getSheetByName(targetName);
+
+  if (target && mode === "SKIP_IF_EXISTS") {
+    Logger.log("[DEV047][SHEETSET] SKIP exists: " + targetName);
+    result.skipped.push(targetName);
+    return;
+  }
+
+  if (!source) {
+    Logger.log("[DEV047][SHEETSET] WARN missing source sheet: " + sourceName + " → creating fallback headers for " + targetName);
+    result.warnings.push("Missing source sheet: " + sourceName + " (created fallback for " + targetName + ")");
+    CSA_DEV047_SB__createOrResetSheet_(ss, targetName, mode, result, function (sh) {
+      var headers = opts.fallbackHeaders || ["col1"];
+      CSA_DEV047_SB__setHeader_(sh, headers);
+    });
+    return;
+  }
+
+  if (!target) {
+    target = source.copyTo(ss).setName(targetName);
+    result.created.push(targetName);
+    Logger.log("[DEV047][SHEETSET] CREATED by clone: " + targetName);
+  } else {
+    // RESET_HEADERS mode: keep sheet, reset to header-only clone behavior.
+    result.updated.push(targetName);
+    Logger.log("[DEV047][SHEETSET] RESET (existing) by clone-template: " + targetName);
+  }
+
+  // Clear all content except header row (row 1).
+  var lastRow = target.getLastRow();
+  if (lastRow > 1) {
+    target.getRange(2, 1, lastRow - 1, target.getMaxColumns()).clearContent();
+  }
+}
+
+function CSA_DEV047_SB__createOrResetSheet_(ss, name, mode, result, initFn) {
+  var sh = ss.getSheetByName(name);
+
+  if (sh && mode === "SKIP_IF_EXISTS") {
+    Logger.log("[DEV047][SHEETSET] SKIP exists: " + name);
+    result.skipped.push(name);
+    return;
+  }
+
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    result.created.push(name);
+    Logger.log("[DEV047][SHEETSET] CREATED: " + name);
+  } else {
+    result.updated.push(name);
+    Logger.log("[DEV047][SHEETSET] RESET: " + name);
+    sh.clearContents();
+  }
+
+  initFn(sh);
+}
+
+function CSA_DEV047_SB__setHeader_(sh, headers) {
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function CSA_DEV047_SB__seedKeywords_(sh) {
+  // Locked PoC keywords (DEV047 Stable Checkpoint) — Strict SIGNAL + Option B robbery/armed robbery
+  // NOTE: base_weight is stored but scoring uses flat 5 per SIGNAL in DEV047 harness.
+  var rows = [
+    ["shooting", "SIGNAL", 5, "Y", "*", ""],
+    ["shot", "SIGNAL", 5, "Y", "*", ""],
+    ["gunfire", "SIGNAL", 5, "Y", "*", ""],
+    ["bomb threat", "SIGNAL", 5, "Y", "*", ""],
+    ["explosive", "SIGNAL", 5, "Y", "*", ""],
+    ["arson", "SIGNAL", 5, "Y", "*", ""],
+    ["firebomb", "SIGNAL", 5, "Y", "*", ""],
+    ["assault", "SIGNAL", 5, "Y", "*", ""],
+    ["stabbed", "SIGNAL", 5, "Y", "*", ""],
+    ["stabbing", "SIGNAL", 5, "Y", "*", ""],
+    ["killed", "SIGNAL", 5, "Y", "*", ""],
+    ["homicide", "SIGNAL", 5, "Y", "*", ""],
+    ["vehicle attack", "SIGNAL", 5, "Y", "*", ""],
+    ["body found", "SIGNAL", 5, "Y", "*", ""],
+    ["robbery", "SIGNAL", 5, "Y", "*", ""],
+    ["armed robbery", "SIGNAL", 5, "Y", "*", ""],
+    ["drill", "NEGATION", 0, "Y", "*", ""],
+    ["training", "NEGATION", 0, "Y", "*", ""],
+    ["exercise", "NEGATION", 0, "Y", "*", ""],
+    ["hoax", "NEGATION", 0, "Y", "*", ""],
+    ["false alarm", "NEGATION", 0, "Y", "*", ""]
+  ];
+
+  sh.getRange(2, 1, rows.length, 6).setValues(rows);
+  Logger.log("[DEV047][SHEETSET] Seeded keyword_definitions rows=" + rows.length);
+}
