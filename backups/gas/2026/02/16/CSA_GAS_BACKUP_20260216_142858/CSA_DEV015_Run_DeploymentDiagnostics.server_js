@@ -1,0 +1,174 @@
+/**
+ * @file_name: CSA_DEV015_Deployment_Diagnostics_v1_0.gs
+ * @project_name: CSA_v1
+ * @thread: DEV015
+ * @purpose: Collect WebApp deployment + cache risk diagnostics
+ * @scope: READ-ONLY (no mutations)
+ * @date_time: 2026-01-07 08:21 MST
+ */
+
+// const CSA_TIMEZONE = 'America/Phoenix'; //This is already a global const -Tim
+
+/* ===========================
+ * ENTRY POINT
+ * =========================== */
+function CSA_DEV015_Run_DeploymentDiagnostics() {
+  logSection('DEV015 — Deployment Diagnostics START');
+
+  assertReadOnly_();
+
+  const scriptId = ScriptApp.getScriptId();
+  const nowMST = Utilities.formatDate(
+    new Date(),
+    CSA_TIMEZONE,
+    'yyyy-MM-dd HH:mm:ss'
+  );
+
+  const deployments = getWebAppDeployments_(scriptId);
+  const incidentCount = getIncidentRowCount_();
+
+  const report = {
+    generated_at_MST: nowMST,
+    script_id: scriptId,
+    environment: getProp_('CSA_ENV'),
+    campus: getProp_('CSA_CAMPUS_NAME'),
+    deployment_summary: summarizeDeployments_(deployments),
+    incident_row_count: incidentCount,
+    cache_risk_assessment: assessCacheRisk_(deployments),
+    guarantees: {
+      read_only: true,
+      no_deployments_created: true,
+      no_state_mutation: true
+    }
+  };
+
+  logObject_('DEV015 REPORT', report);
+  writeReportToDrive_(report);
+
+  logSection('DEV015 — Deployment Diagnostics END');
+}
+
+/* ===========================
+ * DEPLOYMENT INTROSPECTION
+ * =========================== */
+function getWebAppDeployments_(scriptId) {
+  const response = Script.Projects.Deployments.list(scriptId);
+  if (!response || !response.deployments) return [];
+
+  return response.deployments
+    .filter(d => d.entryPoints)
+    .map(d => {
+      const webApp = d.entryPoints.find(e => e.entryPointType === 'WEB_APP');
+      return {
+        deploymentId: d.deploymentId,
+        description: d.deploymentConfig?.description || '(none)',
+        version: d.deploymentConfig?.versionNumber || 'HEAD',
+        webApp: webApp ? {
+          access: webApp.webApp?.access,
+          executeAs: webApp.webApp?.executeAs
+        } : null,
+        lastUpdateTime: d.updateTime
+      };
+    })
+    .sort((a, b) => new Date(b.lastUpdateTime) - new Date(a.lastUpdateTime));
+}
+
+/* ===========================
+ * INCIDENT SANITY
+ * =========================== */
+function getIncidentRowCount_() {
+  try {
+    const ss = SpreadsheetApp.openById(getProp_('CSA_SPREADSHEET_ID'));
+    const sheet = ss.getSheetByName('test3_incident_data');
+    if (!sheet) return 'SHEET_NOT_FOUND';
+    return Math.max(sheet.getLastRow() - 1, 0);
+  } catch (e) {
+    return `ERROR: ${e.message}`;
+  }
+}
+
+/* ===========================
+ * ANALYSIS
+ * =========================== */
+function summarizeDeployments_(deployments) {
+  return {
+    total_webapp_deployments: deployments.length,
+    latest_deployment: deployments[0] || null,
+    deployment_ids: deployments.map(d => d.deploymentId),
+    versions_in_play: [...new Set(deployments.map(d => d.version))]
+  };
+}
+
+function assessCacheRisk_(deployments) {
+  if (deployments.length === 0) {
+    return 'NO_DEPLOYMENTS_FOUND — abnormal';
+  }
+
+  const versions = deployments.map(d => d.version);
+  const hasMultipleVersions = new Set(versions).size > 1;
+
+  return {
+    multiple_versions_detected: hasMultipleVersions,
+    risk_level: hasMultipleVersions ? 'HIGH' : 'LOW',
+    note: hasMultipleVersions
+      ? 'Multiple WebApp versions can cause stale client execution graphs'
+      : 'Single version; cache risk reduced'
+  };
+}
+
+/* ===========================
+ * REPORT OUTPUT
+ * =========================== */
+function writeReportToDrive_(report) {
+  const text =
+`CSA DEV015 — Deployment Diagnostics
+==================================
+Generated (MST): ${report.generated_at_MST}
+Script ID: ${report.script_id}
+ENV: ${report.environment}
+Campus: ${report.campus}
+
+--- Deployment Summary ---
+${JSON.stringify(report.deployment_summary, null, 2)}
+
+--- Cache Risk Assessment ---
+${JSON.stringify(report.cache_risk_assessment, null, 2)}
+
+--- Incident Data Sanity ---
+Incident Rows: ${report.incident_row_count}
+
+--- Guarantees ---
+${JSON.stringify(report.guarantees, null, 2)}
+`;
+
+  const blob = Utilities.newBlob(
+    text,
+    'text/plain',
+    `CSA_DEV015_Deployment_Diagnostics_${Date.now()}.txt`
+  );
+
+  DriveApp.createFile(blob);
+}
+
+/* ===========================
+ * SAFETY / UTIL
+ * =========================== */
+function assertReadOnly_() {
+  // Explicit guardrail — no deploy(), no write(), no mutation.
+  return true;
+}
+
+function getProp_(key) {
+  return PropertiesService.getScriptProperties().getProperty(key) || '(unset)';
+}
+
+function logSection(title) {
+  Logger.log('================================');
+  Logger.log(title);
+  Logger.log('================================');
+}
+
+function logObject_(label, obj) {
+  Logger.log(label);
+  Logger.log(JSON.stringify(obj, null, 2));
+}
