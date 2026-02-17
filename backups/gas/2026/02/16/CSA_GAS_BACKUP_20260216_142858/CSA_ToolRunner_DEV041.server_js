@@ -1,0 +1,462 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_v1.1_ToolRunner.gs
+ * @title: CSA ToolRunner (Canonical Operator Surface + History Controls)
+ * @product: CSA_v1.1 — Church Safety Alerts
+ * @version: v1.1.1-DEV048
+ * @binder_type: DEV Tooling (Non-runtime; Operator-controlled entrypoints)
+ * @current_phase: Governance Tightening / ToolRunner-only Execution Surface
+ *
+ * @thread_lineage:
+ *   DEV040 (Governance baseline)
+ *   → DEV041 (Single canonical ToolRunner + verifier)
+ *   → DEV042 (QD containment + read-only reporting)
+ *   → DEV045 → DEV046 (Keyword/Risk PoC contract + scaffold)
+ *   → DEV047 (Execution harness + environment guardrails + history tooling)
+ *   → DEV048 (test2 ingest harness integration + operator explainers)
+ *
+ * @create_date: 2026-02-11 19:25 MST
+ * @last_updated: 2026-02-15 16:34 MST
+ * @authors: DEV041, DEV042, DEV047, DEV048
+ *
+ * PURPOSE (Plain English)
+ * ----------------------
+ * This file is the ONLY approved editor-run execution surface.
+ * It exposes safe, named "RUN_*" entrypoints that:
+ *  - Call verified tools (baseline capture/verify, diagnostics, reporting),
+ *  - Call PoC scaffolds/harness functions *if present* (no hard dependency),
+ *  - Create "Apps Script History" entries (project Versions) and/or Drive snapshots.
+ *
+ * FUNCTION INDEX (What each entrypoint does)
+ * -----------------------------------------
+ * Stable Checkpoint Control:
+ *  - RUN_DEV_CaptureStableCheckpointBaseline()
+ *      Captures a baseline signature (sheets + headers + key script props) used for later verify.
+ *  - RUN_PROD_VerifyStableCheckpoint()
+ *      Verifies current state against the captured baseline (DEV041 verifier).
+ *
+ * DEV046 PoC:
+ *  - RUN_DEV046_Create_PoC_Spreadsheet()
+ *      Runs the DEV046 PoC scaffold spreadsheet creator if installed.
+ *
+ * DEV042 Diagnostics / Reporting:
+ *  - RUN_DEV042_VERIFY_DataBridge()
+ *      Runs a read-only DataBridge verification helper if installed.
+ *  - RUN_DEV042_ContainerBinding_Proof()
+ *      Runs a container-binding proof helper if installed.
+ *  - RUN_DEV042_Dump_Props_And_Functions_REDACTED()
+ *      Emits binder-safe report to Logger (properties redacted).
+ *  - RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER()
+ *      Emits raw report to Logger (includes sensitive values) — do not paste into binder.
+ *
+ * DEV047 Harness Hooks (Optional / Only if your DEV047 files exist):
+ *  - RUN_DEV047_SelfTest()
+ *      Calls CSA_DEV047_SelfTest_() if present.
+ *  - RUN_DEV047_Ingest_From_QueueSheet()
+ *      Calls RUN_DEV047_Ingest_From_QueueSheet() or CSA_DEV047_Ingest_From_QueueSheet_() if present.
+ *  - RUN_ENV_AuditEnvironment()
+ *      Calls CSA_ENV_AuditEnvironment_() if present (prefix/env guard audit).
+ *  - RUN_ENV_Set_Test3_PROD(), RUN_ENV_Set_Test2_DEV(), RUN_ENV_Lock(), RUN_ENV_Unlock()
+ *      Calls respective ENV guard functions if present.
+ *
+ * DEV048 Test2 Harness (Optional / Only if your DEV048 harness file exists):
+ *  - RUN_DEV048_Test2_DryRun_IngestHarness()
+ *      Calls CSA_DEV048_Run_Test2_IngestHarness_DryRun_() if present (no writes).
+ *  - RUN_DEV048_Test2_Commit_IngestHarness()
+ *      Calls CSA_DEV048_Run_Test2_IngestHarness_() if present (writes append-only rows).
+ *  - RUN_DEV048_Explain_Test2_IngestHarness()
+ *      Prints operator explainer (what it does, inputs/outputs, guardrails).
+ *
+ * Apps Script History (Two ways):
+ *  - RUN_HISTORY_CreateProjectVersion()
+ *      Creates a new immutable Apps Script Version (true “History” entry) via Apps Script API.
+ *      Requires Apps Script API enabled + OAuth scope script.projects.
+ *  - RUN_HISTORY_BackupSourceToDrive()
+ *      Calls CSA_Backup_GAS_Source_OnDemand() if present (Drive snapshot “history”).
+ *      Requires CSA_GAS_BACKUP_FOLDER_ID property (used by the backup tool).
+ *  - RUN_HISTORY_UpdateAppsScriptHistory()
+ *      Convenience wrapper: tries CreateProjectVersion then BackupSourceToDrive (best-effort).
+ *
+ * GOVERNANCE NOTES
+ * ---------------
+ * - No onOpen(), no menus, no triggers created here.
+ * - Tools in this file must be operator-invoked only.
+ * - All optional tools are called through CSA_CALL_IfExists_ to prevent hard dependency breaks.
+ * --------------------------------------------------------------------
+ */
+
+
+/* ============================================================
+   SECTION 1 — Stable Checkpoint Control (DEV041)
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_DEV041_VerifyStableCheckpoint_();
+}
+
+
+/* ============================================================
+   SECTION 2 — DEV046 PoC (Optional)
+============================================================ */
+
+function RUN_DEV046_Create_PoC_Spreadsheet() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV046_Create_PoC_Spreadsheet_',
+    [],
+    '[ToolRunner][DEV046]'
+  );
+}
+
+
+/* ============================================================
+   SECTION 3 — DEV042 Diagnostics (Controlled Entry)
+============================================================ */
+
+function RUN_DEV042_VERIFY_DataBridge() {
+  return CSA_CALL_IfExists_(
+    'CSA_VERIFY_DataBridge_',
+    [],
+    '[ToolRunner][DEV042][VERIFY] DataBridge'
+  );
+}
+
+function RUN_DEV042_ContainerBinding_Proof() {
+  return CSA_CALL_IfExists_(
+    'CSA_ProveContainerBinding_',
+    [],
+    '[ToolRunner][DEV042][DIAG] Container Binding Proof'
+  );
+}
+
+
+/* ============================================================
+   SECTION 4 — DEV042 Read-Only Reporting (Binder/Handoff)
+============================================================ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'REDACTED',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'RAW',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT][RAW] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+
+/* ============================================================
+   SECTION 5 — DEV047 Harness Hooks (Optional)
+============================================================ */
+
+function RUN_DEV047_SelfTest() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV047_SelfTest_',
+    [],
+    '[ToolRunner][DEV047]'
+  );
+}
+
+/**
+ * Supports either naming:
+ *  - RUN_DEV047_Ingest_From_QueueSheet (runner-style)
+ *  - CSA_DEV047_Ingest_From_QueueSheet_ (tool-style)
+ */
+function RUN_DEV047_Ingest_From_QueueSheet() {
+  // Prefer runner-style if present.
+  var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+
+  if (typeof g['RUN_DEV047_Ingest_From_QueueSheet'] === 'function' &&
+      g['RUN_DEV047_Ingest_From_QueueSheet'] !== RUN_DEV047_Ingest_From_QueueSheet) {
+    return CSA_CALL_IfExists_(
+      'RUN_DEV047_Ingest_From_QueueSheet',
+      [],
+      '[ToolRunner][DEV047][INGEST]'
+    );
+  }
+
+  // Fallback: tool-style.
+  return CSA_CALL_IfExists_(
+    'CSA_DEV047_Ingest_From_QueueSheet_',
+    [],
+    '[ToolRunner][DEV047][INGEST]'
+  );
+}
+
+function RUN_ENV_AuditEnvironment() {
+  return CSA_CALL_IfExists_(
+    'CSA_ENV_AuditEnvironment_',
+    [],
+    '[ToolRunner][DEV047][ENV_AUDIT]'
+  );
+}
+
+function RUN_ENV_Set_Test3_PROD() {
+  return CSA_CALL_IfExists_(
+    'CSA_ENV_Set_Test3_PROD_',
+    [],
+    '[ToolRunner][DEV047][ENV]'
+  );
+}
+
+function RUN_ENV_Set_Test2_DEV() {
+  return CSA_CALL_IfExists_(
+    'CSA_ENV_Set_Test2_DEV_',
+    [],
+    '[ToolRunner][DEV047][ENV]'
+  );
+}
+
+function RUN_ENV_Lock() {
+  return CSA_CALL_IfExists_(
+    'CSA_ENV_Lock_',
+    [],
+    '[ToolRunner][DEV047][ENV]'
+  );
+}
+
+function RUN_ENV_Unlock() {
+  return CSA_CALL_IfExists_(
+    'CSA_ENV_Unlock_',
+    [],
+    '[ToolRunner][DEV047][ENV]'
+  );
+}
+
+
+/* ============================================================
+   SECTION 6 — DEV048 Test2 Harness (Optional)
+============================================================ */
+
+/**
+ * DEV048 — Test2 Ingest Harness (DRY RUN)
+ * - No sheet writes
+ * - Logs INCLUDE/DISCARD decisions only
+ */
+function RUN_DEV048_Test2_DryRun_IngestHarness() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV048_Run_Test2_IngestHarness_DryRun_',
+    [],
+    '[ToolRunner][DEV048][TEST2][DRYRUN]'
+  );
+}
+
+/**
+ * DEV048 — Test2 Ingest Harness (COMMIT)
+ * - Appends append-only rows to:
+ *    test2_incident_data
+ *    test2_discarded_events
+ */
+function RUN_DEV048_Test2_Commit_IngestHarness() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV048_Run_Test2_IngestHarness_',
+    [],
+    '[ToolRunner][DEV048][TEST2][COMMIT]'
+  );
+}
+
+/**
+ * DEV048 — Operator explainer for the Test2 harness.
+ * Prints to Logger and returns the full text.
+ */
+function RUN_DEV048_Explain_Test2_IngestHarness() {
+  var explanation = [
+    'DEV048 Test2 Ingest Harness — Operator Explainer',
+    '-------------------------------------------------',
+    'Purpose:',
+    '  Proof-of-concept keyword + risk ingestion engine for test2.',
+    '',
+    'Inputs:',
+    '  test2_poc_ingest_queue',
+    '  test2_keyword_definitions',
+    '',
+    'Outputs (append-only):',
+    '  test2_incident_data        (included incidents)',
+    '  test2_discarded_events     (discarded incidents)',
+    '',
+    'Keyword Rules:',
+    '  - SIGNAL matches INCLUDE (>=1 signal keyword hit)',
+    '  - No SIGNAL matches DISCARD:',
+    '      NO_SIGNAL or NEGATION_NO_SIGNAL',
+    '',
+    'Risk Model (PoC):',
+    '  risk_level = min(10, 5 × SIGNAL_count)',
+    '  risk_label derived (LOW/ELEVATED/HIGH/CRITICAL).',
+    '',
+    'RawPubDate:',
+    '  Stored verbatim as received from queue (never rewritten).',
+    '',
+    'Guardrails:',
+    '  - Refuses if CSA_ENV = PROD',
+    '  - Refuses unless CSA_SHEET_PREFIX = test2_',
+    '',
+    'Modes:',
+    '  DRY RUN  → logs decisions only (no writes)',
+    '  COMMIT   → appends rows (append-only)'
+  ].join('\n');
+
+  Logger.log('\n' + explanation);
+  return explanation;
+}
+
+
+/* ============================================================
+   SECTION 7 — Apps Script History (Versions + Drive Snapshot)
+============================================================ */
+
+/**
+ * Creates a new immutable Apps Script Version (true History entry).
+ * Uses Apps Script API: POST https://script.googleapis.com/v1/projects/{scriptId}/versions
+ * Requires Apps Script API enabled + scope: https://www.googleapis.com/auth/script.projects
+ */
+function RUN_HISTORY_CreateProjectVersion() {
+  try {
+    var scriptId = ScriptApp.getScriptId();
+    var token = ScriptApp.getOAuthToken();
+
+    var ts = Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss');
+    var desc = 'CSA ToolRunner History (DEV047) — ' + ts + ' MST';
+
+    var url = 'https://script.googleapis.com/v1/projects/' + encodeURIComponent(scriptId) + '/versions';
+
+    Logger.log('[ToolRunner][HISTORY] Creating project version…');
+    var res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ description: desc }),
+      muteHttpExceptions: true
+    });
+
+    var code = res.getResponseCode();
+    var body = res.getContentText() || '';
+
+    if (code < 200 || code >= 300) {
+      Logger.log('[ToolRunner][HISTORY] FAIL createVersion http=' + code + ' body=' + body);
+      return {
+        ok: false,
+        reason: 'HTTP_ERROR',
+        http_code: code,
+        response: body,
+        note: 'Likely missing Apps Script API enablement or missing OAuth scope script.projects.'
+      };
+    }
+
+    var payload = JSON.parse(body);
+    Logger.log('[ToolRunner][HISTORY] OK createVersion versionNumber=' + payload.versionNumber);
+    return { ok: true, version: payload };
+
+  } catch (e) {
+    Logger.log('[ToolRunner][HISTORY] ERROR createVersion: ' + String(e));
+    return { ok: false, reason: 'EXCEPTION', error: String(e) };
+  }
+}
+
+/**
+ * Calls the existing Drive snapshot tool (if installed):
+ *  - CSA_Backup_GAS_Source_OnDemand()
+ * This produces a Drive folder snapshot: CSA_GAS_BACKUP_yyyyMMdd_HHmmss
+ */
+function RUN_HISTORY_BackupSourceToDrive() {
+  return CSA_CALL_IfExists_(
+    'CSA_Backup_GAS_Source_OnDemand',
+    [],
+    '[ToolRunner][HISTORY][DRIVE_SNAPSHOT]'
+  );
+}
+
+/**
+ * Convenience wrapper: best-effort attempt to record history by:
+ *  1) Creating an Apps Script Version (true history)
+ *  2) Creating a Drive snapshot (operational backup history)
+ */
+function RUN_HISTORY_UpdateAppsScriptHistory() {
+  var out = {
+    ok: true,
+    createVersion: null,
+    driveSnapshot: null,
+    timestamp_mst: Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST'
+  };
+
+  out.createVersion = RUN_HISTORY_CreateProjectVersion();
+  out.driveSnapshot = RUN_HISTORY_BackupSourceToDrive();
+
+  if (!out.createVersion || out.createVersion.ok !== true) out.ok = false;
+  if (!out.driveSnapshot || out.driveSnapshot.ok !== true) out.ok = false;
+
+  Logger.log('[ToolRunner][HISTORY] DONE ok=' + out.ok);
+  return out;
+}
+
+
+/* ============================================================
+   SECTION 8 — Internal Helpers (ToolRunner-only)
+============================================================ */
+
+function CSA_CALL_IfExists_(fnName, args, logPrefix) {
+  try {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    var fn = g[fnName];
+
+    if (typeof fn !== 'function') {
+      Logger.log((logPrefix || '[ToolRunner]') + ' Missing function: ' + fnName);
+      return { ok: false, reason: 'MISSING_FUNCTION', missing: fnName };
+    }
+
+    Logger.log((logPrefix || '[ToolRunner]') + ' Running: ' + fnName);
+    var result = fn.apply(null, args || []);
+    Logger.log((logPrefix || '[ToolRunner]') + ' Completed: ' + fnName);
+
+    return { ok: true, function: fnName, result: result };
+
+  } catch (e) {
+    Logger.log((logPrefix || '[ToolRunner]') + ' ERROR in ' + fnName + ': ' + String(e));
+    return { ok: false, reason: 'EXCEPTION', function: fnName, error: String(e) };
+  }
+}
+
+/**
+ * Logger has line/size limits; this prints large text safely in chunks.
+ */
+function CSA_LogInChunks_(text, prefix) {
+  prefix = prefix || '';
+  var s = String(text || '');
+  if (!s) {
+    Logger.log(prefix + '(empty)');
+    return;
+  }
+
+  var CHUNK = 3500;
+  for (var i = 0; i < s.length; i += CHUNK) {
+    Logger.log(prefix + s.substring(i, i + CHUNK));
+  }
+}
