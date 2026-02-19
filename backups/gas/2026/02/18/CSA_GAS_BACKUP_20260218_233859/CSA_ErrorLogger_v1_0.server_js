@@ -1,0 +1,46 @@
+/**
+ * @file_name: CSA_ErrorLogger_v1_1_DEV032.gs
+ * @title: CSA Error Logger — Legacy Bridge to Observability
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 09:00 MST
+ * @Last Updated: 2026-01-25 09:00 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Preserve CSA_LogError_ and CSA_LogException_ callers.
+ * Forward into v1.1 observability.
+ */
+
+function CSA_LogException_(err, ctx) {
+  try {
+    CSA_LogEvent_({
+      severity: 'ERROR',
+      domain: 'EXCEPTION',
+      stage: 'RESPOND',
+      outcome: 'FAILED',
+      error: err && err.name ? err.name : 'Exception',
+      function_name: ctx || 'UNKNOWN',
+      message: err && err.message ? err.message : String(err),
+      error_details: err && err.stack ? { stack: err.stack } : {}
+    });
+  } catch (e) {}
+}
+
+function CSA_LogError_(payload) {
+  try {
+    CSA_LogEvent_({
+      severity: payload.severity || 'ERROR',
+      domain: payload.source || 'SYSTEM',
+      stage: 'RESPOND',
+      outcome: 'FAILED',
+      error: payload.error_name || payload.error || 'UNSPECIFIED',
+      function_name: payload.function_name || '',
+      message: payload.message || '',
+      error_details: payload.error_details || {}
+    });
+  } catch (e) {}
+}
