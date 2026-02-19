@@ -1,0 +1,99 @@
+/**
+ * --------------------------------------------------------------------
+ * File: CSA_DataBridge_DEV034_Phase1.gs
+ * Title: CSA DataBridge — Phase 1 Timestamp Payload Extension
+ * Product: CSA_v1 — Church Safety Alerts
+ * Version: v1.1.0-DEV034
+ * Binder Type: Implementation (Phase 1)
+ * Current Phase: DEV034 — Phase 1 Execution
+ * Thread Lineage:
+ *   DEV026 (Timestamp Spec)
+ *   → DEV027 (Contract Update)
+ *   → DEV033 (v1.1 Stable Checkpoint)
+ *   → DEV034 (Phase 1 Payload Extension)
+ *
+ * Create Date: 2026-01-29
+ * Last Updated: 2026-01-29
+ * Authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV017-Author / DEV034)
+ *
+ * --------------------------------------------------------------------
+ * PURPOSE
+ * --------------------------------------------------------------------
+ * This file implements DEV034 Phase 1 by extending the WebApp
+ * `?mode=data` response payload with additive, derived timestamp fields:
+ *
+ *   - timestamp_epoch_ms
+ *   - timestamp_tz
+ *
+ * These fields are:
+ *   • Derived server-side
+ *   • Payload-only (NOT written to Sheets)
+ *   • Backward-compatible
+ *
+ * --------------------------------------------------------------------
+ * NON-NEGOTIABLE CONSTRAINTS
+ * --------------------------------------------------------------------
+ * 1. Router behavior is NOT modified.
+ * 2. Sheet schemas are NOT modified.
+ * 3. Existing payload fields are NOT removed or renamed.
+ * 4. timestamp_epoch_ms is derived from canonical epoch milliseconds.
+ * 5. timestamp_tz is always "America/Phoenix".
+ *
+ * --------------------------------------------------------------------
+ */
+
+function CSA_GetIncidentData_DEV034_() {
+  const SHEET_NAME = 'test3_incident_data'; // read-only
+  const CAMPUS_NAME = 'Laveen';
+
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    throw new Error('Required sheet not found: ' + SHEET_NAME);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+
+  const col = {};
+  headers.forEach(function (h, i) {
+    col[h] = i;
+  });
+
+  const incidents = [];
+
+  values.forEach(function (row) {
+    if (!row[col.id]) return;
+
+    const epochMs = Number(row[col.timestamp_sort]);
+
+    const incident = {
+      id_a: row[col.id],
+      incident_type: row[col.incident_type],
+      description: row[col.description],
+      latitude: row[col.latitude],
+      longitude: row[col.longitude],
+
+      // Existing fields (unchanged)
+      timestamp_display: row[col.timestamp_display],
+      timestamp_iso: row[col.timestamp_iso],
+      timestamp_sort: epochMs,
+
+      // DEV034 Phase 1 — Additive fields
+      timestamp_epoch_ms: epochMs,
+      timestamp_tz: 'America/Phoenix'
+    };
+
+    incidents.push(incident);
+  });
+
+  return {
+    campus: CAMPUS_NAME,
+    count: incidents.length,
+    incidents: incidents,
+    error: false,
+    source: 'SHEET'
+  };
+}
