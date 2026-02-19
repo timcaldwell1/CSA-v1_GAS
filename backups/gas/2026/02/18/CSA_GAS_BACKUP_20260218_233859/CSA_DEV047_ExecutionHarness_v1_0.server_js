@@ -1,0 +1,227 @@
+/***************************************************************************************
+ * Script Name: CSA_DEV047_ExecutionHarness_v1_2.gs
+ * Title: DEV047 — Sheet-Native Ingestion Harness
+ * Product: CSA_v1.1 — Church Safety Alerts
+ * Script Version: v1.2
+ * Status: ACTIVE
+ * Effective Date/Time (MST): 2026-02-15
+ * Thread Lineage: DEV045 → DEV046 → DEV047
+ *
+ * DESCRIPTION
+ * -----------
+ * This version reads directly from structured rows in:
+ *
+ *     <prefix>_poc_ingest_queue
+ *
+ * No raw CSV parsing.
+ * No delimiter dependency.
+ * Sheet must already contain header row + data rows.
+ *
+ ***************************************************************************************/
+
+var CSA_DEV047 = {
+  TZ: "America/Phoenix",
+  RISK_MODEL_VERSION: "1",
+
+  riskLabelForLevel: function (riskLevel) {
+    if (riskLevel === 0) return "INFO";
+    if (riskLevel <= 3) return "LOW";
+    if (riskLevel <= 6) return "ELEVATED";
+    if (riskLevel <= 9) return "HIGH";
+    return "CRITICAL";
+  },
+
+  riskLevelForSignalCount: function (count) {
+    return Math.min(10, count * 5);
+  }
+};
+
+/* ============================================================
+   PUBLIC ENTRYPOINT
+============================================================ */
+
+function CSA_DEV047_IngestFromQueueSheet_() {
+
+  var prefix = CSA_DEV047__getPrefix_();
+  var campus = CSA_DEV047__getCampus_();
+  var ss = CSA_DEV047__getSpreadsheet_();
+
+  Logger.log("[DEV047][INGEST] START prefix=" + prefix + " campus=" + campus);
+
+  var queue = ss.getSheetByName(prefix + "_poc_ingest_queue");
+  if (!queue) throw new Error("Missing sheet: " + prefix + "_poc_ingest_queue");
+
+  var data = queue.getDataRange().getValues();
+
+  Logger.log("[DEV047][DEBUG] Row count=" + data.length);
+  Logger.log("[DEV047][DEBUG] Column count=" + data[0].length);
+
+  if (data.length < 2) {
+    throw new Error("Sheet must contain header + at least one data row.");
+  }
+
+  var header = data[0].map(function (h) {
+    return String(h).trim().toLowerCase();
+  });
+
+  Logger.log("[DEV047][DEBUG] Header: " + header.join(","));
+
+  var idx = {
+    id: header.indexOf("incident_id"),
+    type: header.indexOf("incident_type"),
+    desc: header.indexOf("description"),
+    raw: header.indexOf("rawpubdate")
+  };
+
+  if (idx.id < 0 || idx.type < 0 || idx.desc < 0) {
+    throw new Error("Missing required headers: incident_id, incident_type, description");
+  }
+
+  var keywordConfig = CSA_DEV047__loadKeywords_(prefix);
+
+  var incidentSheet = ss.getSheetByName(prefix + "_incident_data");
+  var discardSheet = ss.getSheetByName(prefix + "_discarded_events");
+
+  var included = 0;
+  var discarded = 0;
+
+  for (var r = 1; r < data.length; r++) {
+
+    var row = data[r];
+    var id = row[idx.id];
+
+    if (!id) continue;
+
+    var type = row[idx.type] || "";
+    var desc = row[idx.desc] || "";
+    var raw = (idx.raw >= 0) ? row[idx.raw] : "";
+
+    var text = CSA_DEV047__normalize_(type + " " + desc);
+
+    var matches = CSA_DEV047__matchSignals_(text, keywordConfig.signals);
+    var negations = CSA_DEV047__matchSignals_(text, keywordConfig.negations);
+
+    if (matches.length === 0) {
+
+      var reason = negations.length > 0 ? "NEGATION_NO_SIGNAL" : "NO_SIGNAL";
+
+      discardSheet.appendRow([
+        id,
+        "KEYWORD",
+        reason,
+        negations[0] || "",
+        campus,
+        CSA_DEV047__timestamp_()
+      ]);
+
+      Logger.log("[DEV047][ROW] " + id + " DISCARD reason=" + reason);
+      discarded++;
+      continue;
+    }
+
+    var riskLevel = CSA_DEV047.riskLevelForSignalCount(matches.length);
+    var riskLabel = CSA_DEV047.riskLabelForLevel(riskLevel);
+
+    incidentSheet.appendRow([
+      id,
+      type,
+      desc,
+      matches.join(","),
+      riskLevel,
+      riskLabel,
+      campus,
+      CSA_DEV047__timestamp_(),
+      raw,
+      CSA_DEV047.RISK_MODEL_VERSION
+    ]);
+
+    Logger.log("[DEV047][ROW] " + id + " INCLUDE signals=" +
+      matches.join(",") + " risk=" + riskLevel + " (" + riskLabel + ")");
+    included++;
+  }
+
+  Logger.log("[DEV047][INGEST] DONE included=" + included + " discarded=" + discarded);
+
+  return { included: included, discarded: discarded };
+}
+
+/* ============================================================
+   BACKWARD-COMPATIBLE WRAPPER
+============================================================ */
+
+function CSA_DEV047_Ingest_From_QueueSheet_() {
+  return CSA_DEV047_IngestFromQueueSheet_();
+}
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+function CSA_DEV047__getSpreadsheet_() {
+  var id = PropertiesService.getScriptProperties().getProperty("CSA_SPREADSHEET_ID");
+  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_DEV047__getPrefix_() {
+  return PropertiesService.getScriptProperties().getProperty("CSA_SHEET_PREFIX") || "test3";
+}
+
+function CSA_DEV047__getCampus_() {
+  return PropertiesService.getScriptProperties().getProperty("CSA_CAMPUS_NAME") || "UNKNOWN";
+}
+
+function CSA_DEV047__timestamp_() {
+  return Utilities.formatDate(new Date(), CSA_DEV047.TZ, "yyyy-MM-dd HH:mm:ss 'MST'");
+}
+
+function CSA_DEV047__normalize_(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function CSA_DEV047__loadKeywords_(prefix) {
+
+  var ss = CSA_DEV047__getSpreadsheet_();
+  var sheet = ss.getSheetByName(prefix + "_keyword_definitions");
+
+  if (!sheet) throw new Error("Missing sheet: " + prefix + "_keyword_definitions");
+
+  var values = sheet.getDataRange().getValues();
+  var header = values[0].map(function (h) { return String(h).toLowerCase(); });
+
+  var kIdx = header.indexOf("keyword");
+  var tIdx = header.indexOf("taxonomy_class");
+  var aIdx = header.indexOf("active");
+
+  var signals = [];
+  var negations = [];
+
+  for (var i = 1; i < values.length; i++) {
+
+    var row = values[i];
+    if (String(row[aIdx]).toUpperCase() !== "Y") continue;
+
+    var keyword = CSA_DEV047__normalize_(row[kIdx]);
+    var type = String(row[tIdx]).toUpperCase();
+
+    if (type === "SIGNAL") signals.push(keyword);
+    if (type === "NEGATION") negations.push(keyword);
+  }
+
+  Logger.log("[DEV047][DEBUG] Loaded signals=" + signals.length + " negations=" + negations.length);
+
+  return { signals: signals, negations: negations };
+}
+
+function CSA_DEV047__matchSignals_(text, list) {
+  var hits = [];
+  for (var i = 0; i < list.length; i++) {
+    var k = list[i];
+    var regex = new RegExp("\\b" + k.replace(/\s+/g, "\\s+") + "\\b", "g");
+    if (regex.test(text)) hits.push(k);
+  }
+  return hits;
+}
