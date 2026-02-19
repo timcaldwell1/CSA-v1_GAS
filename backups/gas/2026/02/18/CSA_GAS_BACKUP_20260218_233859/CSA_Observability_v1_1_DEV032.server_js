@@ -1,0 +1,84 @@
+/**
+ * @file_name: CSA_Observability_v1_1_DEV032.gs
+ * @title: CSA Observability — Event Logging v1.1
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 09:00 MST
+ * @Last Updated: 2026-01-25 09:00 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Structured, append-only observability events.
+ *
+ * GUARANTEES
+ * ----------
+ * - Fail-open
+ * - Never blocks execution
+ * - Backward compatible
+ */
+
+var CSA_ERRLOG_V11_COLUMNS = [
+  'event_id',
+  'event_ts_iso',
+  'domain',
+  'stage',
+  'outcome',
+  'request_id'
+];
+
+function CSA_LogEvent_(evt) {
+  try {
+    evt = evt || {};
+    const props = PropertiesService.getScriptProperties();
+
+    const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'test3'; // HARDCODED fallback
+    const sheetName = prefix + '_error_log';
+
+    const ss = SpreadsheetApp.openById(props.getProperty('CSA_SPREADSHEET_ID'));
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+
+    // ensure columns exist (append-only)
+    let dirty = false;
+    CSA_ERRLOG_V11_COLUMNS.forEach(c => {
+      if (headers.indexOf(c) === -1) {
+        headers.push(c);
+        dirty = true;
+      }
+    });
+    if (dirty) sheet.getRange(1,1,1,headers.length).setValues([headers]);
+
+    const row = new Array(headers.length).fill('');
+
+    function set(col, val) {
+      const i = headers.indexOf(col);
+      if (i !== -1) row[i] = val;
+    }
+
+    set('timestamp', CSA_NowMST_());
+    set('env', props.getProperty('CSA_ENV') || 'UNKNOWN');
+    set('source', evt.source || '');
+    set('severity', evt.severity || 'ERROR');
+    set('error', evt.error || 'UNSPECIFIED');
+    set('function_name', evt.function_name || '');
+    set('message', evt.message || '');
+    set('error_details', evt.error_details ? JSON.stringify(evt.error_details) : '');
+
+    set('event_id', Utilities.getUuid());
+    set('event_ts_iso', new Date().toISOString());
+    set('domain', evt.domain || 'SYSTEM');
+    set('stage', evt.stage || 'DETECT');
+    set('outcome', evt.outcome || 'FAILED');
+    set('request_id', evt.request_id || '');
+
+    sheet.appendRow(row);
+
+  } catch (e) {
+    // swallow
+  }
+}
