@@ -1,0 +1,148 @@
+/**
+ * @file_name: CSA_Push_Latest_GAS_Snapshot_To_GitHub.gs
+ * @title: CSA — Push Latest GAS Snapshot to GitHub
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.0.2
+ * @binder_type: Operations / Safeguards
+ * @current_phase: Stable Checkpoint
+ * @thread_lineage: DEV021 → DEV024
+ * @create_date: 2026-01-17 18:47 MST
+ * @last_updated: 2026-01-18 02:22 MST
+ * @authors:
+ *   Tim Caldwell
+ *   G (DEV017-Author), DEV024
+ */
+
+function CSA_Push_Latest_GAS_Snapshot_To_GitHub() {
+
+  const props = PropertiesService.getScriptProperties();
+
+  const GITHUB_PAT = (props.getProperty('GITHUB_PAT') || '').trim();
+  const GITHUB_REPO = props.getProperty('GITHUB_REPO');
+  const GITHUB_BRANCH = props.getProperty('GITHUB_BRANCH');
+  const BASE_PATH = props.getProperty('GITHUB_BASE_PATH');
+  const BACKUP_FOLDER_ID = props.getProperty('CSA_GAS_BACKUP_FOLDER_ID');
+
+  if (!GITHUB_PAT || !GITHUB_REPO || !GITHUB_BRANCH || !BASE_PATH || !BACKUP_FOLDER_ID) {
+    throw new Error('Missing or empty Script Properties.');
+  }
+
+  // ------------------------------------------------------------------
+  // AUTH SANITY CHECK (THIS IS THE TELL)
+  // ------------------------------------------------------------------
+  const authCheck = UrlFetchApp.fetch('https://api.github.com/user', {
+    method: 'get',
+    headers: {
+      Authorization: 'Bearer ' + GITHUB_PAT,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'CSA-GAS-Backup',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    muteHttpExceptions: false
+  });
+
+  Logger.log('GitHub auth check OK: %s', authCheck.getResponseCode());
+
+  // ------------------------------------------------------------------
+  // Locate most recent snapshot folder
+  // ------------------------------------------------------------------
+  const parent = DriveApp.getFolderById(BACKUP_FOLDER_ID);
+  const folders = parent.getFolders();
+
+  let latestFolder = null;
+  let latestName = '';
+
+  while (folders.hasNext()) {
+    const f = folders.next();
+    if (f.getName().startsWith('CSA_GAS_BACKUP_') && f.getName() > latestName) {
+      latestName = f.getName();
+      latestFolder = f;
+    }
+  }
+
+  if (!latestFolder) {
+    throw new Error('No CSA_GAS_BACKUP_* folder found.');
+  }
+
+  const ts = latestFolder.getName().replace('CSA_GAS_BACKUP_', '');
+  const year = ts.substring(0, 4);
+  const month = ts.substring(4, 6);
+  const day = ts.substring(6, 8);
+
+  const repoBasePath =
+    BASE_PATH + '/' + year + '/' + month + '/' + day + '/' + latestFolder.getName();
+
+  const files = latestFolder.getFiles();
+  const fileList = [];
+
+  while (files.hasNext()) fileList.push(files.next());
+  if (!fileList.length) throw new Error('Snapshot folder is empty.');
+
+  fileList.forEach(function(file) {
+    const path = repoBasePath + '/' + file.getName();
+    const url = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/' + path;
+
+    const payload = {
+      message: 'GAS snapshot — ' + formatNowMST_(),
+      content: Utilities.base64Encode(file.getBlob().getBytes()),
+      branch: GITHUB_BRANCH,
+      committer: {
+        name: 'Tim Caldwell',
+        email: 'CCSAsafetyteam@gmail.com'
+      }
+    };
+
+    const response = UrlFetchApp.fetch(url, {
+      method: 'put',
+      contentType: 'application/json',
+      headers: {
+        Authorization: 'Bearer ' + GITHUB_PAT,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'CSA-GAS-Backup',
+        'X-GitHub-Api-Version': '2022-11-28'
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: false
+    });
+
+    const code = response.getResponseCode();
+    if (code < 200 || code >= 300) {
+      throw new Error('GitHub write failed (' + code + '): ' + response.getContentText());
+    }
+  });
+
+  Logger.log(
+    'CSA Git push complete: repo=%s branch=%s path=%s files=%s',
+    GITHUB_REPO,
+    GITHUB_BRANCH,
+    repoBasePath,
+    fileList.length
+  );
+}
+
+function formatNowMST_() {
+  return Utilities.formatDate(
+    new Date(),
+    'America/Phoenix',
+    "yyyy-MM-dd HH:mm 'MST'"
+  );
+}
+function CSA_GitHub_Auth_Test() {
+  const token = PropertiesService.getScriptProperties()
+    .getProperty('GITHUB_PAT')
+    .trim();
+
+  const resp = UrlFetchApp.fetch('https://api.github.com/user', {
+    method: 'get',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'CSA-Auth-Test',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    muteHttpExceptions: true
+  });
+
+  Logger.log('Status: %s', resp.getResponseCode());
+  Logger.log(resp.getContentText());
+}
