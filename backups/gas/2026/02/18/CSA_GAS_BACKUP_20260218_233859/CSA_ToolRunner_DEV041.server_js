@@ -1,0 +1,255 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_v1.1_ToolRunner.gs
+ * @title: CSA ToolRunner (Canonical Operator Surface + History Controls)
+ * @product: CSA_v1.1 — Church Safety Alerts
+ * @version: v1.1.3-DEV049
+ * @binder_type: DEV Tooling (Non-runtime; Operator-controlled entrypoints)
+ * @current_phase: Governance Tightening / ToolRunner-only Execution Surface
+ *
+ * @thread_lineage:
+ *   DEV040 (Governance baseline)
+ *   → DEV041 (Single canonical ToolRunner + verifier)
+ *   → DEV042 (QD containment + read-only reporting)
+ *   → DEV045 → DEV046 (Keyword/Risk PoC contract + scaffold)
+ *   → DEV047 (Execution harness + environment guardrails + history tooling)
+ *   → DEV048 (test2 ingest harness integration + operator explainers)
+ *   → DEV049 (integration support: GitHub backup diagnostics + UOD View Layer)
+ *
+ * @create_date: 2026-02-11 19:25 MST
+ * @last_updated: 2026-02-18 09:25 MST
+ * @authors: DEV041, DEV042, DEV047, DEV048, DEV049
+ * --------------------------------------------------------------------
+ */
+
+/* ============================================================
+   SECTION 1 — Stable Checkpoint Control (DEV041)
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_DEV041_VerifyStableCheckpoint_();
+}
+
+/* ============================================================
+   SECTION 2 — DEV046 PoC (Optional)
+============================================================ */
+
+function RUN_DEV046_Create_PoC_Spreadsheet() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV046_Create_PoC_Spreadsheet_',
+    [],
+    '[ToolRunner][DEV046]'
+  );
+}
+
+/* ============================================================
+   SECTION 3 — DEV042 Diagnostics (Controlled Entry)
+============================================================ */
+
+function RUN_DEV042_VERIFY_DataBridge() {
+  return CSA_CALL_IfExists_(
+    'CSA_VERIFY_DataBridge_',
+    [],
+    '[ToolRunner][DEV042][VERIFY] DataBridge'
+  );
+}
+
+function RUN_DEV042_ContainerBinding_Proof() {
+  return CSA_CALL_IfExists_(
+    'CSA_ProveContainerBinding_',
+    [],
+    '[ToolRunner][DEV042][DIAG] Container Binding Proof'
+  );
+}
+
+/* ============================================================
+   SECTION 4 — DEV042 Read-Only Reporting (Binder/Handoff)
+============================================================ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'REDACTED',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+  if (typeof CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'RAW',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  CSA_LogInChunks_(report.binder_markdown, '[ToolRunner][DEV042][REPORT][RAW] ');
+  return { ok: true, mode: report.mode, generated_at_mst: report.generated_at_mst, report: report };
+}
+
+/* ============================================================
+   SECTION 5 — DEV047 Harness Hooks
+============================================================ */
+
+function RUN_DEV047_SelfTest() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV047_SelfTest_',
+    [],
+    '[ToolRunner][DEV047]'
+  );
+}
+
+/* ============================================================
+   SECTION 6 — DEV048 Test2 Harness
+============================================================ */
+
+function RUN_DEV048_Test2_DryRun_IngestHarness() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV048_Run_Test2_IngestHarness_DryRun_',
+    [],
+    '[ToolRunner][DEV048][TEST2][DRYRUN]'
+  );
+}
+
+function RUN_DEV048_Test2_Commit_IngestHarness() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV048_Run_Test2_IngestHarness_',
+    [],
+    '[ToolRunner][DEV048][TEST2][COMMIT]'
+  );
+}
+
+/* ============================================================
+   SECTION 7 — Apps Script History (Versions + Drive Snapshot)
+============================================================ */
+
+function RUN_HISTORY_CreateProjectVersion() {
+  return CSA_CALL_IfExists_(
+    'RUN_HISTORY_CreateProjectVersion',
+    [],
+    '[ToolRunner][HISTORY][CREATE_VERSION]'
+  );
+}
+
+function RUN_HISTORY_BackupSourceToDrive() {
+  return CSA_CALL_IfExists_(
+    'CSA_Backup_GAS_Source_OnDemand',
+    [],
+    '[ToolRunner][HISTORY][DRIVE_SNAPSHOT]'
+  );
+}
+
+/* ============================================================
+   SECTION 7B — GitHub Snapshot Push (DEV049 Support)
+============================================================ */
+
+function RUN_GITHUB_AuthTest_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_Auth_Test_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][AUTH]'
+  );
+}
+
+function RUN_GITHUB_DiagnosePermissions_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_DiagnosePermissions_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][DIAG]'
+  );
+}
+
+function RUN_GITHUB_PushLatestDriveSnapshot_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_Push_Latest_GAS_Snapshot_To_GitHub_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][PUSH]'
+  );
+}
+
+/* ============================================================
+   SECTION 8 — DEV049 Unified Observational Dataset (UOD)
+============================================================ */
+
+function RUN_DEV049_UOD_View_Full() {
+  return CSA_CALL_IfExists_(
+    'CSA_UOD_Query_',
+    [{}],
+    '[ToolRunner][DEV049][UOD][FULL]'
+  );
+}
+
+function RUN_DEV049_UOD_Inspect_Debug() {
+  var rows = CSA_UOD_Query_({});
+  Logger.log('[ToolRunner][DEV049][UOD][DEBUG] Row Count: ' + rows.length);
+
+  if (rows.length > 0) {
+    var preview = JSON.stringify(rows[0]);
+    if (preview.length > 3000) {
+      preview = preview.substring(0, 3000) + '... [truncated]';
+    }
+    Logger.log('[ToolRunner][DEV049][UOD][DEBUG] First Row Sample:');
+    Logger.log(preview);
+  }
+
+  return { ok: true, row_count: rows.length };
+}
+
+/* ============================================================
+   SECTION 9 — Internal Helpers
+============================================================ */
+
+function CSA_CALL_IfExists_(fnName, args, logPrefix) {
+  try {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    var fn = g[fnName];
+
+    if (typeof fn !== 'function') {
+      Logger.log((logPrefix || '[ToolRunner]') + ' Missing function: ' + fnName);
+      return { ok: false, reason: 'MISSING_FUNCTION', missing: fnName };
+    }
+
+    Logger.log((logPrefix || '[ToolRunner]') + ' Running: ' + fnName);
+    var result = fn.apply(null, args || []);
+    Logger.log((logPrefix || '[ToolRunner]') + ' Completed: ' + fnName);
+
+    return { ok: true, function: fnName, result: result };
+
+  } catch (e) {
+    Logger.log((logPrefix || '[ToolRunner]') + ' ERROR in ' + fnName + ': ' + String(e));
+    return { ok: false, reason: 'EXCEPTION', function: fnName, error: String(e) };
+  }
+}
+
+function CSA_LogInChunks_(text, prefix) {
+  prefix = prefix || '';
+  var s = String(text || '');
+  if (!s) {
+    Logger.log(prefix + '(empty)');
+    return;
+  }
+
+  var CHUNK = 3500;
+  for (var i = 0; i < s.length; i += CHUNK) {
+    Logger.log(prefix + s.substring(i, i + CHUNK));
+  }
+}
