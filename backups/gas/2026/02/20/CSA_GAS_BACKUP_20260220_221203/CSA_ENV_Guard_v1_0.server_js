@@ -1,0 +1,210 @@
+/***************************************************************************************
+ * Script Name: CSA_ENV_Guard_v1_0.gs
+ * Title: CSA ENV Guard — Safe Switch + Audit (Prefix/ENV Latch)
+ * Product: CSA_v1 — Church Safety Alerts
+ * Script Type: Google Apps Script (.gs)
+ * Script Version: v1.0
+ * Status: ACTIVE — Governance Guardrail
+ * Effective Date/Time (MST): 2026-02-14
+ * Thread Lineage: DEV041 → DEV042 → DEV047
+ * Supersedes: —
+ * Authors: Tim Caldwell (Product / Governor), DEV047
+ *
+ * Purpose
+ * - Provide a single, deterministic guard module for environment posture:
+ *   - Safe switching between test3 (baseline) and test2 (experimental)
+ *   - Auditing that required sheets exist for the active prefix
+ *   - Enforcing latch policy: CSA_ENV=PROD MUST use CSA_SHEET_PREFIX=test3
+ *   - Optional lock: CSA_ENV_LOCK prevents accidental changes unless explicitly unlocked
+ *
+ * Non-Negotiable Governance
+ * - This file does not create triggers, menus, or UI elements.
+ * - This file does not create or delete sheets.
+ * - This file only reads/writes Script Properties and reads spreadsheet sheet names.
+ *
+ * Script Properties Used
+ * - CSA_ENV: "PROD" | "DEV"
+ * - CSA_SHEET_PREFIX: "test3" | "test2" | etc.
+ * - CSA_ENV_LOCK: "ON" | "OFF"  (default OFF)
+ * - CSA_SPREADSHEET_ID: optional, else active spreadsheet
+ *
+ ***************************************************************************************/
+
+var CSA_ENV_GUARD = {
+  TZ: "America/Phoenix",
+  //HARDCODED: Baseline policy target for PROD.
+  PROD_REQUIRED_PREFIX: "test3",
+  //HARDCODED: Minimal required sheet set for DEV047 ingestion harness.
+  REQUIRED_SUFFIXES_DEV047: [
+    "_keyword_definitions",
+    "_incident_data",
+    "_discarded_events",
+    "_poc_ingest_queue",
+    "_safety_zones",
+    "_error_log",
+    "_audit_log"
+  ]
+};
+
+/**
+ * Audit the current environment posture.
+ * - Logs a single concise summary line plus warnings/errors.
+ *
+ * @param {Object=} options
+ *   - requiredSuffixes: string[] override list of required suffixes for the active prefix
+ *   - strictProdLatch: boolean (default true) enforce CSA_ENV=PROD => prefix must be test3
+ *   - debug: boolean (default false) log extra details
+ * @returns {Object} audit result
+ */
+function CSA_ENV_AuditEnvironment_(options) {
+  options = options || {};
+  var strictProdLatch = (options.strictProdLatch === false) ? false : true;
+  var debug = Boolean(options.debug || false);
+
+  var props = PropertiesService.getScriptProperties();
+  var env = String(props.getProperty("CSA_ENV") || "DEV").trim().toUpperCase();
+  var prefix = String(props.getProperty("CSA_SHEET_PREFIX") || "").trim();
+  var lock = String(props.getProperty("CSA_ENV_LOCK") || "OFF").trim().toUpperCase();
+
+  var ss = CSA_ENV__getSpreadsheet_();
+  var sheetNames = ss.getSheets().map(function (s) { return s.getName(); });
+
+  var requiredSuffixes = options.requiredSuffixes || CSA_ENV_GUARD.REQUIRED_SUFFIXES_DEV047;
+  var requiredSheets = requiredSuffixes.map(function (suf) { return prefix + suf; });
+
+  var missing = requiredSheets.filter(function (name) { return sheetNames.indexOf(name) < 0; });
+
+  var violations = [];
+  if (!prefix) violations.push("MISSING_PREFIX");
+  if (strictProdLatch && env === "PROD" && prefix !== CSA_ENV_GUARD.PROD_REQUIRED_PREFIX) {
+    violations.push("PROD_PREFIX_POLICY_VIOLATION");
+  }
+  if (missing.length > 0) violations.push("MISSING_REQUIRED_SHEETS");
+
+  var ok = (violations.length === 0);
+
+  var summary = "[ENV_AUDIT] ok=" + ok +
+    " env=" + env +
+    " prefix=" + (prefix || "(unset)") +
+    " lock=" + lock +
+    " missing=" + missing.length +
+    (violations.length ? " violations=" + violations.join(",") : "");
+
+  Logger.log(summary);
+
+  if (missing.length) Logger.log("[ENV_AUDIT] Missing sheets: " + missing.join(" | "));
+  if (strictProdLatch && env === "PROD" && prefix !== CSA_ENV_GUARD.PROD_REQUIRED_PREFIX) {
+    Logger.log("[ENV_AUDIT] POLICY: CSA_ENV=PROD requires CSA_SHEET_PREFIX=" + CSA_ENV_GUARD.PROD_REQUIRED_PREFIX);
+  }
+  if (debug) {
+    Logger.log("[ENV_AUDIT][DEBUG] sheet_count=" + sheetNames.length);
+    Logger.log("[ENV_AUDIT][DEBUG] requiredSheets=" + requiredSheets.join(" | "));
+  }
+
+  return {
+    ok: ok,
+    env: env,
+    prefix: prefix,
+    lock: lock,
+    requiredSheets: requiredSheets,
+    missingSheets: missing,
+    violations: violations,
+    sheetCount: sheetNames.length,
+    timestamp_mst: CSA_ENV__fmtMst_(new Date())
+  };
+}
+
+/**
+ * Safe posture switch (guarded).
+ *
+ * @param {Object} posture
+ *   - env: "PROD" | "DEV"
+ *   - prefix: "test3" | "test2" | etc.
+ *   - runAudit: boolean (default true)
+ *   - strictProdLatch: boolean (default true)
+ *   - overrideLock: boolean (default false) allow change even if CSA_ENV_LOCK=ON
+ *   - debug: boolean
+ * @returns {Object} result
+ */
+function CSA_ENV_SetPosture_(posture) {
+  posture = posture || {};
+  var targetEnv = String(posture.env || "DEV").trim().toUpperCase();
+  var targetPrefix = String(posture.prefix || "").trim();
+  var runAudit = (posture.runAudit === false) ? false : true;
+  var strictProdLatch = (posture.strictProdLatch === false) ? false : true;
+  var overrideLock = Boolean(posture.overrideLock || false);
+  var debug = Boolean(posture.debug || false);
+
+  if (!targetPrefix) throw new Error("CSA_ENV_SetPosture_: target prefix is required.");
+
+  var props = PropertiesService.getScriptProperties();
+  var lock = String(props.getProperty("CSA_ENV_LOCK") || "OFF").trim().toUpperCase();
+
+  if (lock === "ON" && !overrideLock) {
+    Logger.log("[ENV_SWITCH] REFUSED: CSA_ENV_LOCK=ON. Use RUN_ENV_Unlock() then retry.");
+    return { ok: false, reason: "LOCKED", lock: lock };
+  }
+
+  if (strictProdLatch && targetEnv === "PROD" && targetPrefix !== CSA_ENV_GUARD.PROD_REQUIRED_PREFIX) {
+    Logger.log("[ENV_SWITCH] REFUSED: PROD requires prefix=" + CSA_ENV_GUARD.PROD_REQUIRED_PREFIX +
+      " (requested " + targetPrefix + ")");
+    return { ok: false, reason: "PROD_PREFIX_POLICY_VIOLATION", required_prefix: CSA_ENV_GUARD.PROD_REQUIRED_PREFIX };
+  }
+
+  var prevEnv = String(props.getProperty("CSA_ENV") || "DEV").trim().toUpperCase();
+  var prevPrefix = String(props.getProperty("CSA_SHEET_PREFIX") || "").trim();
+
+  props.setProperty("CSA_ENV", targetEnv);
+  props.setProperty("CSA_SHEET_PREFIX", targetPrefix);
+
+  Logger.log("[ENV_SWITCH] SET env: " + prevEnv + " -> " + targetEnv + " | prefix: " + (prevPrefix || "(unset)") + " -> " + targetPrefix);
+
+  var audit = null;
+  if (runAudit) audit = CSA_ENV_AuditEnvironment_({ strictProdLatch: strictProdLatch, debug: debug });
+
+  return {
+    ok: audit ? audit.ok : true,
+    changed: { env: (prevEnv !== targetEnv), prefix: (prevPrefix !== targetPrefix) },
+    previous: { env: prevEnv, prefix: prevPrefix },
+    current: { env: targetEnv, prefix: targetPrefix },
+    audit: audit,
+    timestamp_mst: CSA_ENV__fmtMst_(new Date())
+  };
+}
+
+/** Convenience posture switches **/
+function CSA_ENV_Set_Test3_PROD_() {
+  return CSA_ENV_SetPosture_({ env: "PROD", prefix: "test3", runAudit: true, strictProdLatch: true });
+}
+
+function CSA_ENV_Set_Test2_DEV_() {
+  return CSA_ENV_SetPosture_({ env: "DEV", prefix: "test2", runAudit: true, strictProdLatch: true });
+}
+
+/** Lock controls **/
+function CSA_ENV_Lock_() {
+  PropertiesService.getScriptProperties().setProperty("CSA_ENV_LOCK", "ON");
+  Logger.log("[ENV_LOCK] CSA_ENV_LOCK=ON");
+  return { ok: true, CSA_ENV_LOCK: "ON", timestamp_mst: CSA_ENV__fmtMst_(new Date()) };
+}
+
+function CSA_ENV_Unlock_() {
+  PropertiesService.getScriptProperties().setProperty("CSA_ENV_LOCK", "OFF");
+  Logger.log("[ENV_LOCK] CSA_ENV_LOCK=OFF");
+  return { ok: true, CSA_ENV_LOCK: "OFF", timestamp_mst: CSA_ENV__fmtMst_(new Date()) };
+}
+
+/* =========================
+ * Internal Helpers
+ * ========================= */
+
+function CSA_ENV__getSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties();
+  var ssId = props.getProperty("CSA_SPREADSHEET_ID");
+  if (ssId && String(ssId).trim()) return SpreadsheetApp.openById(String(ssId).trim());
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_ENV__fmtMst_(d) {
+  return Utilities.formatDate(d, CSA_ENV_GUARD.TZ, "yyyy-MM-dd HH:mm:ss 'MST'");
+}
