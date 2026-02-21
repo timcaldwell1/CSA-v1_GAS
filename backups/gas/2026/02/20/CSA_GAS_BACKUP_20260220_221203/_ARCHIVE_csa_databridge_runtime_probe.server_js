@@ -1,0 +1,54 @@
+/**
+ * --------------------------------------------------------------------
+ * File: csa_databridge_runtime_probe.gs
+ * Title: TEMP — DataBridge Runtime Identity Probe
+ * Product: CSA_v1 — Church Safety Alerts
+ * Version: v0.1.0-TEMP
+ * Binder Type: DEV / QA Instrumentation (TEMP)
+ * Current Phase: DEV036 — Runtime Verification
+ * Thread Lineage:
+ *   DEV034 (Payload Extension)
+ *   → DEV036 (UI Consumption / Verification)
+ *
+ * Create Date: 2026-01-29
+ * Last Updated: 2026-01-29
+ * Authors:
+ *   Tim Caldwell
+ *   ChatGPT (DEV036)
+ *
+ * --------------------------------------------------------------------
+ * ⚠️ TEMPORARY FILE — DO NOT KEEP
+ * --------------------------------------------------------------------
+ * This script is used ONLY to determine which DataBridge implementation
+ * is actually executing at runtime.
+ *
+ * It MUST be deleted after verification.
+ *
+ * --------------------------------------------------------------------
+ * NON-NEGOTIABLE CONSTRAINTS
+ * --------------------------------------------------------------------
+ * 1. No router logic changes.
+ * 2. No sheet writes.
+ * 3. No schema changes.
+ * 4. No persistence.
+ * 5. Log-only + optional payload echo.
+ * --------------------------------------------------------------------
+ */
+/*
+function CSA_DataBridge_RuntimeProbe_() {
+  const probe = {
+    probe_id: 'CSA_DATABRIDGE_RUNTIME_PROBE',
+    script_id: ScriptApp.getScriptId(),
+    script_name: 'csa_databridge_runtime_probe.gs',
+    timestamp_iso: new Date().toISOString(),
+    stack_hint: new Error().stack
+  };
+
+  // Loud, unmistakable log entry
+  try {
+    console.log('🚨 RUNTIME PROBE HIT 🚨', JSON.stringify(probe));
+  } catch (e) {}
+
+  return probe;
+}
+*/
