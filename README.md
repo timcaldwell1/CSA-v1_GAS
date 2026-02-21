@@ -1,12 +1,3 @@
-# 2️⃣ New `README.md` for GitHub
-
-**Replace the existing README entirely.**
-
-Below is a clean, production-grade, governance-aware README.
-
----
-
-```markdown
 # CSA_v1 — Church Safety Alerts
 
 Church Safety Alerts (CSA_v1) is a Google Apps Script–based Proof of Concept (PoC) system for monitoring and visualizing local incident data for campus safety awareness.
