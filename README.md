@@ -1,201 +1,116 @@
+
 # CSA_v1 — Church Safety Alerts
 
-Church Safety Alerts (CSA_v1) is a Google Apps Script–based Proof of Concept (PoC) system for monitoring and visualizing local incident data for campus safety awareness.
-
-This repository contains the canonical GAS source snapshots exported from the container-bound script project.
-
----
-
-# Project Status
-
-**Current Checkpoint:** DEV042  
-**Stable Verification:** PASS  
-**Date (MST):** 2026-02-13 04:53:30 MST  
-**Governance Model:** ToolRunner-only execution surface  
-**Triggers Installed:** 0  
-**WebApp Entry Point:** `doGet` in `CSA_Router_v1_0`
-
-DEV042 focused on governance tightening and QD (Quick & Dirty) surface reduction.  
-Runtime behavior was not altered.
+Repository: `timcaldwell1/CSA-v1_GAS`
+Branch: `main`
 
 ---
 
-# Architecture Overview
+## Current Product Baseline
 
-Runtime pipeline:
+**Product Version:** CSA_v1.0
+**Governed Artifact Layer:** CSA_v1.1
 
-```
-
-Router → WebApp_Facade → DataBridge → AppShell
-
-```
-
-Key principles:
-
-- Deterministic structural verification
-- No implicit execution (no onOpen, no menus)
-- No triggers
-- Single operator surface via ToolRunner
-- Redacted binder-safe reporting tools
+CSA_v1.0 represents the protected runtime baseline.
+CSA_v1.1 represents governed iteration artifacts (documents and source code).
 
 ---
 
-# Canonical Operator Surface
+## Latest Stable Checkpoint
 
-All editor-run operations must go through:
+**DEV054 — Stable Checkpoint Declared**
+**Effective (MST):** 2026-02-27 17:47 MST
+
+Verifier Result:
 
 ```
-
-CSA_ToolRunner_DEV041.gs
-
+[DEV041][VERIFY][PASS] Baseline matches current.
+Verified at 2026-02-27 17:47:35 MST
 ```
 
-Approved run targets include:
+### Runtime State at Freeze
 
-- Stable checkpoint verification
-- Baseline capture
-- DataBridge validation
-- Container binding proof
-- Read-only reporting (binder-safe)
+* CSA_ENV = DEV
+* CSA_SHEET_PREFIX = test2
+* Trigger Count = 0
+* Deterministic ingest harness (DEV048 contract)
+* UOD read-only convergence intact (DEV049)
+* Execution surfaces consolidated (DEV050)
+* Canonical keyword sheet suffix = `_keyword_defs` (DEV052)
+* QA cycle executed twice (function-level + full E2E)
 
-No other entrypoints are permitted.
+**Runtime Impact:** NONE
+
+No contract changes introduced in DEV054.
 
 ---
 
-# Structural Integrity Model
+## GitHub Backup Reference
 
-CSA_v1 uses a structural signature model that fingerprints:
-
-- Script ID + Timezone
-- Script Properties (secret-safe)
-- Function inventory
-- Spreadsheet schema hashes
-- Trigger inventory
-
-Verification loop:
+**Push Completed:**
 
 ```
-
-Change → Verify (FAIL expected) → Capture → Verify PASS
-
+CSA Git push complete:
+repo=timcaldwell1/CSA-v1_GAS
+branch=main
+path=backups/gas/2026/02/27/CSA_GAS_BACKUP_20260227_183207
+files=65
 ```
 
-Secrets such as PAT values are excluded from structural drift detection.
+This folder represents the DEV054 Stable Checkpoint snapshot.
 
 ---
 
+## Canonical Contracts (Active)
 
-## Backup & Source Control — Google Apps Script Snapshot Push
+1. Ingest Contract (DEV048)
 
-### Overview
+   * Append-only writes
+   * Included + Discarded = Candidates
+   * Refuse in PROD
+   * Prefix guard enforced
 
-CSA_v1 includes an operator-controlled backup mechanism that:
+2. RawPubDate Contract
 
-1. Creates a Drive snapshot folder (`CSA_GAS_BACKUP_YYYYMMDD_HHMMSS`)
-2. Pushes the contents to GitHub under:
+   * Stored verbatim
+   * Context-only
+   * Must not drive sorting, scoring, or reasoning
 
-```
-backups/gas/YYYY/MM/DD/CSA_GAS_BACKUP_YYYYMMDD_HHMMSS/
-```
+3. Keyword Sheet Naming (DEV052)
 
-This preserves full source history outside Apps Script versioning.
+   * `<prefix>_keyword_defs`
 
-This tool does **not** modify ingest logic or runtime behavior.
+4. Namespace Sheet Set (DEV052)
 
----
-
-### Required Script Properties
-
-| Property                   | Description                              |
-| -------------------------- | ---------------------------------------- |
-| `GITHUB_PAT`               | Fine-grained Personal Access Token       |
-| `GITHUB_REPO`              | e.g., `timcaldwell1/CSA-v1_GAS`          |
-| `GITHUB_BRANCH`            | e.g., `main`                             |
-| `GITHUB_BASE_PATH`         | e.g., `backups/gas`                      |
-| `CSA_GAS_BACKUP_FOLDER_ID` | Drive folder containing snapshot folders |
-
----
-
-### Required GitHub Token Permissions (Fine-Grained PAT)
-
-Repository access:
-
-* Select repository: `CSA-v1_GAS`
-
-Repository permissions:
-
-* **Contents → Read and write**
-* Metadata → Read
-
-Other permissions (Actions, Admin, etc.) are not required for contents writes.
-
-If the token lacks `Contents: write`, GitHub will return:
-
-```
-403 Resource not accessible by personal access token
-```
+   * `_poc_ingest_queue`
+   * `_incident_data`
+   * `_discarded_events`
+   * `_keyword_defs`
+   * `_audit_log`
+   * `_error_log`
+   * `_safety_zones`
+   * `_cop_calls_raw`
 
 ---
 
-### ToolRunner Entry Points
+## Governance Discipline
 
-| Function                                      | Purpose                     |
-| --------------------------------------------- | --------------------------- |
-| `RUN_GITHUB_AuthTest_DEV049()`                | Verify token authentication |
-| `RUN_GITHUB_DiagnosePermissions_DEV049()`     | Print permission headers    |
-| `RUN_GITHUB_PushLatestDriveSnapshot_DEV049()` | Push latest snapshot        |
+Stable Checkpoint requires:
 
----
+* Verifier PASS
+* No schema drift
+* No property drift
+* No trigger drift
+* Binder-ready insert
+* GitHub synchronization
 
-### Successful Push Log Example
+Authority hierarchy:
 
-```
-[GITHUB][PUSH] OK backups/gas/2026/02/16/CSA_GAS_BACKUP_20260216_142858/appsscript.json (CREATE)
-[GITHUB][PUSH] DONE pushed=53.0 folder=CSA_GAS_BACKUP_20260216_142858
-[ToolRunner][GITHUB][PUSH] Completed: CSA_GitHub_Push_Latest_GAS_Snapshot_To_GitHub_DEV049_
-```
+Stable Checkpoint Insert
 
-Interpretation:
+> Active Contract
+> Decision Log
+> DEV Insert
+> Working Draft
 
-* All files written successfully
-* No 403
-* No SHA mismatch
-* No partial failure
-
----
-
-### Governance Notes
-
-* Snapshots are append-only in GitHub.
-* Files are created or updated using SHA reconciliation.
-* No runtime CSA ingest logic is affected.
-* This tool exists strictly for operational backup control.
-
----
-
-# Maintainer
-
-Tim Caldwell  
-CSA_v1 — Church Safety Alerts
-
----
-
-# License
-
-Private project — Not for redistribution.
-```
-
----
-
-## 3️⃣ Optional (Recommended)
-
-After pushing:
-
-* Create a Git tag: CSA GAS Source Backup complete: CSA_GAS_BACKUP_20260213_055447
-
-```
-DEV042_STABLE_2026-02-13
-```
-
-This prevents ambiguity later.
-
+Only declared contracts and stable checkpoints modify authority.
