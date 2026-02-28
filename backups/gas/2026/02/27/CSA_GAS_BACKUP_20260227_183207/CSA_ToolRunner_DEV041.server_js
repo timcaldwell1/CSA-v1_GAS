@@ -1,0 +1,133 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_ToolRunner.gs
+ * @title: CSA ToolRunner — Canonical Operator Surface
+ * @product: CSA_v1.0 — Church Safety Alerts
+ * @artifact_namespace: CSA_v1.1 (Documents & Code)
+ * @version: v1.1.16-DEV054
+ * @status: QA IN PROGRESS — NOT STABLE
+ * @create_date: 2026-02-26 MST
+ * @last_updated: 2026-02-26 MST
+ * @thread_lineage: DEV041 → DEV042 → DEV051 → DEV052 → DEV053 → DEV054
+ * @authors: Tim Caldwell → DEV053 → DEV054
+ *
+ * Notes:
+ * - Minimal patch: fix DEV041 FormatMST call signature (requires Date).
+ * - Adds ToolRunner access to on-demand source backup (if present).
+ * - DEV053 wrappers retained; missing DEV053 functions provided via DEV054 shim file.
+ * --------------------------------------------------------------------
+ */
+
+/* ============================================================
+   DEV041 — Stable Checkpoint
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_DEV041_VerifyStableCheckpoint_();
+}
+
+/* ============================================================
+   DEV0xx — Source Backup (On-Demand)
+============================================================ */
+
+function RUN_DEV_Backup_GAS_Source_OnDemand() {
+  // Requires function CSA_Backup_GAS_Source_OnDemand() to exist in project.
+  return CSA_Backup_GAS_Source_OnDemand();
+}
+
+/* ============================================================
+   DEV042 — FULL REPORT RESTORED (LEGACY BEHAVIOR)
+============================================================ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+
+  Logger.log('DEV053 Stable Checkpoint NOT declared.');
+  Logger.log(CSA_DEV041_FormatMST_(new Date())); // ✅ FIX: requires Date
+
+  CSA_DEV041_VerifyStableCheckpoint_();
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({ redacted: true });
+
+  if (report && report.markdown) {
+    Logger.log(report.markdown);
+  }
+
+  return report;
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+
+  Logger.log('DEV053 Stable Checkpoint NOT declared.');
+  Logger.log(CSA_DEV041_FormatMST_(new Date())); // ✅ FIX: requires Date
+
+  CSA_DEV041_VerifyStableCheckpoint_();
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({ redacted: false });
+
+  if (report && report.markdown) {
+    Logger.log(report.markdown);
+  }
+
+  return report;
+}
+
+/* ============================================================
+   DEV053 — QA / Batching / Binding
+============================================================ */
+
+function RUN_DEV053_Status__test6() {
+  return CSA_DEV053_Status__test6();
+}
+
+function RUN_DEV053_ResetCursor__test6() {
+  return CSA_DEV053_ResetCursor_('test6');
+}
+
+function RUN_DEV053_Debug_SpreadsheetBinding__test6() {
+  return CSA_DEV053_Debug_SpreadsheetBinding_('test6');
+}
+
+function RUN_DEV053_CoP_BuildQueue__test6() {
+  return CSA_DEV053_CoP_BuildQueueFromRaw_('test6');
+}
+
+function RUN_DEV053_CoP_FreezeQueue__test6() {
+  return CSA_DEV053_CoP_FreezeQueue_('test6');
+}
+
+function RUN_DEV053_Ingest_Batch_DryRun__test6() {
+  return CSA_DEV053_RunLaneIngest_Batch_DryRun_('test6');
+}
+
+function RUN_DEV053_Ingest_Batch_Commit__test6() {
+  return CSA_DEV053_RunLaneIngest_Batch_Commit_('test6');
+}
+
+function RUN_DEV053_E2E_CoP__test6() {
+
+  Logger.log('[DEV053][E2E][TEST6] START');
+
+  var pre = RUN_DEV053_Status__test6();         
+
+  RUN_DEV053_CoP_BuildQueue__test6();
+  RUN_DEV053_CoP_FreezeQueue__test6();
+  RUN_DEV053_ResetCursor__test6();
+
+  var mid = RUN_DEV053_Status__test6();
+
+  RUN_DEV053_Ingest_Batch_Commit__test6();
+
+  var post = RUN_DEV053_Status__test6();
+
+  Logger.log('[DEV053][E2E][TEST6] END pre=%s mid=%s post=%s',
+    JSON.stringify(pre),
+    JSON.stringify(mid),
+    JSON.stringify(post)
+  );
+
+  return { ok: true, pre: pre, mid: mid, post: post };
+}
