@@ -1,0 +1,51 @@
+/**
+ * ============================================================================
+ * File Name: CSA_ErrorLogger_v1_0.gs
+ * Title: CSA_ErrorLogger_v1_0
+ * Product: CSA_v1.0 — Church Safety Alerts
+ * Artifact Namespace: CSA_v1.1
+ * Version: v1.0
+ * Status: ACTIVE — CANONICAL ERROR LOGGER
+ * Thread Lineage: DEV031 → DEV032 → DEV037 → DEV049 → DEV050
+ * Last Updated (MST): 2026-02-19 8:15 PM MST -tim
+ * Authors: Tim Caldwell → DEV050
+ *
+ * Description:
+ * Canonical error logging module.
+ * Single authoritative implementation of CSA_LogError_().
+ * No business logic. No mutation of ingest.
+ * Writes to <prefix>_error_log only.
+ * ============================================================================
+ */
+
+/**
+ * Canonical error logging entry point.
+ * @param {Object|string} err - Error object or message
+ * @param {string} context - Calling function name
+ */
+function CSA_LogError_(err, context) {
+  try {
+    const prefix = PropertiesService.getScriptProperties().getProperty('CSA_SHEET_PREFIX') || 'test3';
+    const sheetName = prefix + '_error_log';
+    const ss = SpreadsheetApp.openById(
+      PropertiesService.getScriptProperties().getProperty('CSA_SPREADSHEET_ID')
+    );
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return;
+
+    const timestamp = new Date();
+    const message = (err && err.message) ? err.message : String(err);
+    const stack = (err && err.stack) ? err.stack : '';
+
+    sheet.appendRow([
+      timestamp,
+      context || 'UNKNOWN',
+      message,
+      stack
+    ]);
+
+  } catch (loggingFailure) {
+    // Fail-safe: never throw from logger
+    console.error('CSA_LogError_ failure:', loggingFailure);
+  }
+}
