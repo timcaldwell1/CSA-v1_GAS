@@ -1,0 +1,110 @@
+/**
+ * @file_name: csa_e2e_webapp_probe_TEMP.gs
+ * @title: CSA End-to-End WebApp Probe (TEMP)
+ * @product: CSA — Church Safety Alerts
+ * @product_version: CSA_v1.1.0
+ * @version: v0.1.0-TEMP
+ * @created: 2026-01-22
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV028
+ *
+ * FILE TYPE
+ * ---------
+ * NEW TEMP GAS FILE
+ * Prefix: csa_*
+ *
+ * PURPOSE
+ * -------
+ * One-button, end-to-end verification of:
+ *   - WebApp reachability
+ *   - Router mode=data path
+ *   - JSON payload return
+ *
+ * Logs EVERYTHING to GAS Logger.
+ * Does not rely on any CSA helpers or UI code.
+ *
+ * DELETE AFTER USE.
+ // ===== DEV050 DIAGNOSTIC ARCHIVE (MERGED FROM lowercase csa_ FILES) ====
+ // Comment out per DEV0505 Hygiene 2026-02-20 9:15 PM MST -tim
+
+ */
+
+/*
+//function _ARCHIVE_csa_e2e_webapp_probe_TEMP() {
+  Logger.log('===== CSA E2E WEBAPP PROBE START =====');
+
+  const props = PropertiesService.getScriptProperties().getProperties();
+
+  // ---- Resolve WebApp URL ----
+  const webappUrl =
+    props.CSA_WEBAPP_URL ||
+    props.CSA_DEPLOYMENT_URL ||
+    null;
+
+  if (!webappUrl) {
+    Logger.log('[FAIL] No WebApp URL found in Script Properties.');
+    Logger.log('Expected one of: CSA_WEBAPP_URL, CSA_DEPLOYMENT_URL');
+    Logger.log('===== PROBE ABORTED =====');
+    return;
+  }
+
+  const targetUrl = webappUrl + '?mode=data';
+
+  Logger.log('[INFO] WebApp URL: ' + webappUrl);
+  Logger.log('[INFO] Probe URL: ' + targetUrl);
+
+  // ---- HTTP Fetch ----
+  let response;
+  try {
+    response = UrlFetchApp.fetch(targetUrl, {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+  } catch (err) {
+    Logger.log('[FAIL] UrlFetch threw exception');
+    Logger.log(err.message);
+    Logger.log('===== PROBE ABORTED =====');
+    return;
+  }
+
+  const status = response.getResponseCode();
+  const headers = response.getAllHeaders();
+  const bodyText = response.getContentText();
+
+  Logger.log('[INFO] HTTP STATUS: ' + status);
+  Logger.log('[INFO] RESPONSE HEADERS: ' + JSON.stringify(headers));
+  Logger.log('[INFO] RAW BODY (first 1000 chars):');
+  Logger.log(bodyText.substring(0, 1000));
+
+  // ---- JSON Parse Attempt ----
+  let json;
+  try {
+    json = JSON.parse(bodyText);
+    Logger.log('[PASS] JSON parse succeeded');
+  } catch (err) {
+    Logger.log('[FAIL] JSON parse failed');
+    Logger.log(err.message);
+    Logger.log('===== PROBE END (NON-JSON RESPONSE) =====');
+    return;
+  }
+
+  // ---- Semantic Checks ----
+  if (json.incidents && Array.isArray(json.incidents)) {
+    Logger.log('[INFO] incidents[] present');
+    Logger.log('[INFO] incident count = ' + json.incidents.length);
+  } else {
+    Logger.log('[WARN] incidents[] missing or not an array');
+  }
+
+  if (json._diag) {
+    Logger.log('[INFO] Diagnostic flag detected: ' + json._diag);
+  }
+
+  Logger.log('[INFO] FULL JSON (stringified, truncated):');
+  Logger.log(JSON.stringify(json).substring(0, 1500));
+
+  Logger.log('===== CSA E2E WEBAPP PROBE COMPLETE =====');
+}
+*/
