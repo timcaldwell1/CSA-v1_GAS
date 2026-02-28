@@ -1,0 +1,300 @@
+/**
+ * file_name: CSA_DEV053_IngestHarness_Lane_v1_1.gs
+ * title: DEV053 Lane Ingest Harness (Batched; Append-Only; test5/test6+)
+ * product: CSA_v1.0 — Church Safety Alerts
+ * version: v1.1
+ * status: WORKING — BATCH SIZE VIA SCRIPT PROPERTIES
+ * thread_lineage: DEV048 (historical) → DEV053 (active lane ingest)
+ * last_updated: 2026-02-24 7AM MST
+ *
+ * Purpose:
+ * - Execute DEV048-style PoC ingest against lane prefixes (test5/test6+).
+ * - Reads <prefix>_poc_ingest_queue and <prefix>_keyword_defs.
+ * - Appends to <prefix>_incident_data and <prefix>_discarded_events.
+ * - Supports batch execution to avoid Apps Script timeouts.
+ *
+ * Guardrails:
+ * - CSA_ENV=PROD => THROW loudly. //HARDCODED
+ * - CSA_ENV must be DEV.
+ * - Prefix allowlist is tight by default. //HARDCODED (PoC posture)
+ *
+ * Batch Cursor:
+ * - Script Property: CSA_DEV053_CURSOR_<prefixWithoutUnderscore> (e.g., CSA_DEV053_CURSOR_test6)
+ * - Script Property: CSA_DEV053_BATCH_SIZE (default 500; clamped 50..1000) //HARDCODED clamp
+ *
+ * Dependencies:
+ * - Uses DEV048 helper functions. DEV048 is not modified.
+ */
+
+var CSA_DEV053_INGEST = {
+  //HARDCODED — PoC allowlist (tight)
+  ALLOWED_PREFIXES: ['test5_', 'test6_'],
+
+  //HARDCODED — clamp to keep admins from accidentally detonating runtime
+  MIN_BATCH_SIZE: 50,
+  MAX_BATCH_SIZE: 1000
+};
+
+function CSA_DEV053__cursorKey_(prefixWithUnderscore) {
+  var p = String(prefixWithUnderscore || '').replace(/_+$/g, '');
+  return 'CSA_DEV053_CURSOR_' + p;
+}
+
+function CSA_DEV053__getBatchSize_() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = String(props.getProperty('CSA_DEV053_BATCH_SIZE') || '500').trim();
+  var n = parseInt(raw, 10);
+
+  if (!isFinite(n)) n = 500;
+  if (n < CSA_DEV053_INGEST.MIN_BATCH_SIZE) n = 500;
+  if (n > CSA_DEV053_INGEST.MAX_BATCH_SIZE) n = CSA_DEV053_INGEST.MAX_BATCH_SIZE;
+
+  return n;
+}
+
+function CSA_DEV053__getCursor_(prefixWithUnderscore) {
+  var props = PropertiesService.getScriptProperties();
+  var k = CSA_DEV053__cursorKey_(prefixWithUnderscore);
+  var raw = String(props.getProperty(k) || '2').trim();
+  var n = parseInt(raw, 10);
+  if (!isFinite(n) || n < 2) n = 2;
+  return n;
+}
+
+function CSA_DEV053__setCursor_(prefixWithUnderscore, nextRow) {
+  var props = PropertiesService.getScriptProperties();
+  var k = CSA_DEV053__cursorKey_(prefixWithUnderscore);
+  props.setProperty(k, String(nextRow));
+}
+
+function CSA_DEV053_ResetCursor_(lanePrefix) {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var rawPrefix = String(lanePrefix || props.CSA_INGEST_PREFIX || '').trim();
+  if (!rawPrefix) throw new Error('DEV053: ResetCursor missing prefix.');
+
+  var prefix = (typeof CSA_DEV048_NormalizeSheetPrefix_ === 'function')
+    ? CSA_DEV048_NormalizeSheetPrefix_(rawPrefix)
+    : (String(rawPrefix).replace(/_+$/g, '') + '_');
+
+  CSA_DEV053__setCursor_(prefix, 2);
+  Logger.log('[DEV053][CURSOR] Reset %s to row 2', prefix);
+  return { ok: true, prefix: prefix, cursor_row: 2 };
+}
+
+function CSA_DEV053_RunLaneIngestHarness_(options) {
+  options = options || {};
+  var dryRun = String(options.dry_run).toUpperCase() === 'TRUE';
+
+  var started = new Date();
+  var runId = 'DEV053_' + started.getTime();
+
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var env = String(props.CSA_ENV || '').toUpperCase();
+
+  //HARDCODED PROD block (loud fail)
+  if (env === 'PROD') throw new Error('DEV053: Refused CSA_ENV=PROD.');
+  if (env !== 'DEV') return { ok: false, run_id: runId, env: env, error: 'REFUSED_ENV_NOT_DEV' };
+
+  var rawPrefix = String(options.prefix || props.CSA_INGEST_PREFIX || '').trim();
+  if (!rawPrefix) return { ok: false, run_id: runId, env: env, error: 'MISSING_PREFIX' };
+
+  var prefix = (typeof CSA_DEV048_NormalizeSheetPrefix_ === 'function')
+    ? CSA_DEV048_NormalizeSheetPrefix_(rawPrefix)
+    : (String(rawPrefix).replace(/_+$/g, '') + '_');
+
+  //HARDCODED allowlist (PoC posture)
+  if (CSA_DEV053_INGEST.ALLOWED_PREFIXES.indexOf(prefix) === -1) {
+    Logger.log('[DEV053][GUARD] Refused prefix=%s allowed=%s', prefix, CSA_DEV053_INGEST.ALLOWED_PREFIXES.join(','));
+    return { ok: false, run_id: runId, env: env, prefix: prefix, error: 'REFUSED_PREFIX_NOT_ALLOWED' };
+  }
+
+  // Required DEV048 dependencies (must exist)
+  var need = [
+    'CSA_DEV048_IndexRequired_',
+    'CSA_DEV048_LoadKeywordDefs_',
+    'CSA_DEV048_FindMatches_',
+    'CSA_DEV048_NormalizeText_',
+    'CSA_DEV048_Cell_',
+    'CSA_DEV048_BuildIncidentRow_',
+    'CSA_DEV048_BuildDiscardRow_'
+  ];
+  for (var i = 0; i < need.length; i++) {
+    if (typeof this[need[i]] !== 'function') throw new Error('DEV053: Missing dependency ' + need[i]);
+  }
+
+  var ss = (typeof CSA_DEV048_OpenSpreadsheet_ === 'function')
+    ? CSA_DEV048_OpenSpreadsheet_()
+    : SpreadsheetApp.getActiveSpreadsheet();
+
+  var shQueue = ss.getSheetByName(prefix + 'poc_ingest_queue');
+  var shKw    = ss.getSheetByName(prefix + 'keyword_defs');
+  var shInc   = ss.getSheetByName(prefix + 'incident_data');
+  var shDisc  = ss.getSheetByName(prefix + 'discarded_events');
+
+  if (!shQueue) throw new Error('DEV053: Missing required sheet: ' + (prefix + 'poc_ingest_queue'));
+  if (!shKw)    throw new Error('DEV053: Missing required sheet: ' + (prefix + 'keyword_defs'));
+  if (!shInc)   throw new Error('DEV053: Missing required sheet: ' + (prefix + 'incident_data'));
+  if (!shDisc)  throw new Error('DEV053: Missing required sheet: ' + (prefix + 'discarded_events'));
+
+  var readHeader = (typeof CSA_DEV048_ReadHeader_ === 'function')
+    ? CSA_DEV048_ReadHeader_
+    : function (sheet) {
+        var lastCol = Math.max(1, sheet.getLastColumn());
+        var vals = sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+        var out = [];
+        for (var j = 0; j < vals.length; j++) out.push(String(vals[j] || '').trim());
+        return out;
+      };
+
+  var queueHdr = readHeader(shQueue);
+  var kwHdr    = readHeader(shKw);
+  var incHdr   = readHeader(shInc);
+  var discHdr  = readHeader(shDisc);
+
+  var queueIdx = CSA_DEV048_IndexRequired_(queueHdr, ['incident_id','incident_type','description','location','RawPubDate'], 'QUEUE_HEADERS');
+  var kwIdx    = CSA_DEV048_IndexRequired_(kwHdr, ['keyword','taxonomy_class','base_weight','active','campus','notes'], 'KEYWORD_DEFS_HEADERS');
+  var incIdx   = CSA_DEV048_IndexRequired_(incHdr, ['incident_id','incident_type','description','matched_keywords','risk_level','risk_label','campus','timestamp','RawPubDate','risk_model_version'], 'INCIDENT_DATA_HEADERS');
+  var discIdx  = CSA_DEV048_IndexRequired_(discHdr, ['incident_id','stage','reason_code','trigger','campus','timestamp'], 'DISCARDED_EVENTS_HEADERS');
+
+  var kwDefs = CSA_DEV048_LoadKeywordDefs_(shKw, kwHdr, kwIdx);
+  var signalMatchers = kwDefs.signal;
+  var negMatchers = kwDefs.negation;
+
+  var batchSize = CSA_DEV053__getBatchSize_();
+  var cursorRow = CSA_DEV053__getCursor_(prefix);
+
+  var lastRow = shQueue.getLastRow();
+  if (lastRow < 2 || cursorRow > lastRow) {
+    Logger.log('[DEV053][BATCH] Done. prefix=%s cursor=%s lastRow=%s', prefix, cursorRow, lastRow);
+    return { ok: true, run_id: runId, prefix: prefix, done: true, cursor_row: cursorRow, last_queue_row: lastRow };
+  }
+
+  var remaining = lastRow - cursorRow + 1;
+  var take = Math.min(batchSize, remaining);
+  var lastCol = Math.max(1, shQueue.getLastColumn());
+
+  // Display values preserve RawPubDate text behavior
+  var batch = shQueue.getRange(cursorRow, 1, take, lastCol).getDisplayValues();
+
+  var campusDefault = (typeof CSA_DEV048_GetCampusDefault_ === 'function') ? CSA_DEV048_GetCampusDefault_(props) : '*';
+  var nowIso = (typeof CSA_DEV048_NowMstIso_ === 'function') ? CSA_DEV048_NowMstIso_() : new Date().toISOString();
+  var riskLabelFn = (typeof CSA_DEV048_RiskLabel_ === 'function') ? CSA_DEV048_RiskLabel_ : function (lvl) { return (lvl >= 10) ? 'CRITICAL' : 'ELEVATED'; };
+  var riskModelVersion = String(props.CSA_RISK_MODEL_VERSION || 'v1.0'); //HARDCODED fallback
+
+  var totalCandidate = 0, includeCount = 0, discardCount = 0, skippedCount = 0, errorCount = 0;
+  var includeRows = [];
+  var discardRows = [];
+
+  for (var r = 0; r < batch.length; r++) {
+    var row = batch[r];
+
+    try {
+      var incidentId = CSA_DEV048_Cell_(row, queueIdx.incident_id);
+      if (!incidentId) { skippedCount++; continue; }
+      totalCandidate++;
+
+      var incidentType = CSA_DEV048_Cell_(row, queueIdx.incident_type);
+      var description  = CSA_DEV048_Cell_(row, queueIdx.description);
+      var location     = CSA_DEV048_Cell_(row, queueIdx.location);
+      var rawPubDate   = CSA_DEV048_Cell_(row, queueIdx.RawPubDate);
+
+      var normText = CSA_DEV048_NormalizeText_((incidentType || '') + ' ' + (description || ''));
+
+      var signals = CSA_DEV048_FindMatches_(normText, signalMatchers);
+      var negs    = CSA_DEV048_FindMatches_(normText, negMatchers);
+
+      if (signals.length < 1) {
+        var reason = (negs.length >= 1) ? 'NEGATION_NO_SIGNAL' : 'NO_SIGNAL';
+        var trigger = (negs.length >= 1) ? negs[0] : '';
+
+        discardRows.push(CSA_DEV048_BuildDiscardRow_(discHdr, discIdx, {
+          incident_id: incidentId,
+          stage: 'KEYWORD',
+          reason_code: reason,
+          trigger: trigger,
+          campus: campusDefault,
+          timestamp: nowIso
+        }));
+        discardCount++;
+        continue;
+      }
+
+      //HARDCODED PoC risk model: 5×SIGNAL_count cap 10
+      var riskLevel = Math.min(10, 5 * signals.length);
+      var riskLabel = riskLabelFn(riskLevel);
+
+      includeRows.push(CSA_DEV048_BuildIncidentRow_(incHdr, incIdx, {
+        incident_id: incidentId,
+        incident_type: incidentType,
+        description: description,
+        location: location,
+        matched_keywords: signals.join(','),
+        risk_level: riskLevel,
+        risk_label: riskLabel,
+        campus: campusDefault,
+        timestamp: nowIso,
+        RawPubDate: rawPubDate,
+        risk_model_version: riskModelVersion
+      }));
+      includeCount++;
+
+    } catch (err) {
+      errorCount++;
+      Logger.log('[DEV053][ERR] queue_row=%s msg=%s', (cursorRow + r), (err && err.message ? err.message : err));
+    }
+  }
+
+  if (dryRun) {
+    Logger.log('[DEV053][DRY] prefix=%s cursor=%s take=%s cand=%s inc=%s disc=%s skip=%s err=%s',
+      prefix, cursorRow, take, totalCandidate, includeCount, discardCount, skippedCount, errorCount
+    );
+  } else {
+    if (includeRows.length > 0) {
+      var startInc = shInc.getLastRow() + 1;
+      shInc.getRange(startInc, 1, includeRows.length, includeRows[0].length).setValues(includeRows);
+    }
+    if (discardRows.length > 0) {
+      var startDisc = shDisc.getLastRow() + 1;
+      shDisc.getRange(startDisc, 1, discardRows.length, discardRows[0].length).setValues(discardRows);
+    }
+  }
+
+  var nextCursor = cursorRow + take;
+  CSA_DEV053__setCursor_(prefix, nextCursor);
+
+  var durationMs = (new Date()).getTime() - started.getTime();
+  var balanceOk = (includeCount + discardCount) === totalCandidate;
+
+  Logger.log('[DEV053][BATCH][DONE] prefix=%s run_id=%s cursor=%s next=%s take=%s remain=%s cand=%s inc=%s disc=%s ok=%s dur_ms=%s batch_cfg=%s',
+    prefix, runId, cursorRow, nextCursor, take, Math.max(0, lastRow - nextCursor + 1),
+    totalCandidate, includeCount, discardCount, balanceOk, durationMs, ('size=' + batchSize)
+  );
+
+  return {
+    ok: true,
+    run_id: runId,
+    env: env,
+    prefix: prefix,
+    dry_run: dryRun,
+    cursor_row: cursorRow,
+    next_cursor_row: nextCursor,
+    batch_size: take,
+    batch_size_configured: batchSize,
+    remaining_rows: Math.max(0, lastRow - nextCursor + 1),
+    candidates: totalCandidate,
+    included: includeCount,
+    discarded: discardCount,
+    skipped_blank_id: skippedCount,
+    errors: errorCount,
+    balance_ok: balanceOk,
+    duration_ms: durationMs
+  };
+}
+
+function CSA_DEV053_RunLaneIngest_Batch_DryRun_(lanePrefix) {
+  return CSA_DEV053_RunLaneIngestHarness_({ prefix: lanePrefix, dry_run: 'TRUE' });
+}
+
+function CSA_DEV053_RunLaneIngest_Batch_Commit_(lanePrefix) {
+  return CSA_DEV053_RunLaneIngestHarness_({ prefix: lanePrefix, dry_run: 'FALSE' });
+}
