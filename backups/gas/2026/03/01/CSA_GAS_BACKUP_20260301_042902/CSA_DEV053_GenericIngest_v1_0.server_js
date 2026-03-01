@@ -1,0 +1,24 @@
+/**
+ * file_name: CSA_DEV053_GenericIngest_v1_0.gs
+ * title: DEV053 Generic Ingest Harness
+ * product: CSA_v1.0 — Church Safety Alerts
+ * version: 1.0
+ * status: WORKING
+ * thread_lineage: DEV048 → DEV053
+ */
+
+function CSA_DEV053_RunIngest_() {
+  CSA_DEV053_AssertDevEnv_();
+
+  const prefix = CSA_DEV053_GetIngestPrefix_();
+  CSA_DEV053_EnsureMetaSheet_(prefix);
+  CSA_DEV053_AssertSchemaVersion_(prefix, '1.3.0');
+
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('CSA_SHEET_PREFIX', prefix);
+
+  Logger.log('DEV053: Delegating ingest to DEV048 harness with prefix: ' + prefix);
+
+  RUN_DEV048_Test2_DryRun_IngestHarness();
+  RUN_DEV048_Test2_Commit_IngestHarness();
+}
