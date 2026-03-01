@@ -1,0 +1,166 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_ToolRunner.gs
+ * @title: CSA ToolRunner — Canonical Operator Surface
+ * @product: CSA_v1.0 — Church Safety Alerts
+ * @artifact_namespace: CSA_v1.1 (Documents & Code)
+ * @version: v1.1.18-DEV055
+ * @status: WORKING — Prefix-Driven DEV053
+ * @create_date: 2026-02-26 MST
+ * @last_updated: 2026-02-28 11:20 PM MST
+ * @thread_lineage: DEV041 → DEV042 → DEV051 → DEV052 → DEV053 → DEV054 → DEV055
+ * @authors: Tim Caldwell → DEV053 → DEV054 → DEV055
+ *
+ * DEV055 Updates:
+ * - DEV053 section fully prefix-driven (no hardcoded test6)
+ * - Version bump only
+ * - No changes to DEV041/DEV042 logic
+ * --------------------------------------------------------------------
+ */
+
+/* ============================================================
+   DEV041 — Stable Checkpoint
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_DEV041_VerifyStableCheckpoint_();
+}
+
+/* ============================================================
+   DEV0xx — Source Backup (On-Demand)
+============================================================ */
+
+function RUN_DEV_Backup_GAS_Source_OnDemand() {
+  return CSA_Backup_GAS_Source_OnDemand();
+}
+
+/* ============================================================
+   DEV042 — Read-Only Report
+============================================================ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+
+  CSA_DEV041_VerifyStableCheckpoint_();
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({ redacted: true });
+
+  if (report && report.binder_markdown) {
+    Logger.log(report.binder_markdown);
+  }
+
+  return report;
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+
+  CSA_DEV041_VerifyStableCheckpoint_();
+
+  var report = CSA_DEV042_BuildReadOnlyReport_({ redacted: false });
+
+  if (report && report.binder_markdown) {
+    Logger.log(report.binder_markdown);
+  }
+
+  return report;
+}
+
+/* ============================================================
+   DEV053 — QA / Batching / Binding (Prefix-Driven)
+============================================================ */
+
+function CSA_DEV053__activePrefix_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var raw = String(props.CSA_INGEST_PREFIX || '').trim();
+  if (!raw) throw new Error('DEV053: CSA_INGEST_PREFIX not set.');
+  return raw;
+}
+
+// ------------------------------------------------------------
+// Build Queue
+// ------------------------------------------------------------
+
+function RUN_DEV053_CoP_BuildQueue() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return CSA_DEV053_CoP_BuildQueueFromRaw_(prefix);
+}
+
+// ------------------------------------------------------------
+// Freeze Queue
+// ------------------------------------------------------------
+
+function RUN_DEV053_CoP_FreezeQueue() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return CSA_DEV053_CoP_FreezeQueue_(prefix);
+}
+
+// ------------------------------------------------------------
+// Reset Cursor
+// ------------------------------------------------------------
+
+function RUN_DEV053_ResetCursor() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return CSA_DEV053_ResetCursor_(prefix);
+}
+
+// ------------------------------------------------------------
+// Ingest — Dry Run
+// ------------------------------------------------------------
+
+function RUN_DEV053_Ingest_Batch_DryRun() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return CSA_DEV053_RunLaneIngest_Batch_DryRun_(prefix);
+}
+
+// ------------------------------------------------------------
+// Ingest — Commit
+// ------------------------------------------------------------
+
+function RUN_DEV053_Ingest_Batch_Commit() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return CSA_DEV053_RunLaneIngest_Batch_Commit_(prefix);
+}
+
+// ------------------------------------------------------------
+// Status
+// ------------------------------------------------------------
+
+function RUN_DEV053_Status() {
+  var prefix = CSA_DEV053__activePrefix_();
+  return RUN_DEV053_Status__lane(prefix);
+}
+
+// ------------------------------------------------------------
+// End-to-End
+// ------------------------------------------------------------
+
+function RUN_DEV053_E2E_CoP() {
+
+  var prefix = CSA_DEV053__activePrefix_();
+  Logger.log('[DEV053][E2E] START prefix=%s', prefix);
+
+  var pre = RUN_DEV053_Status();
+
+  RUN_DEV053_CoP_BuildQueue();
+  RUN_DEV053_CoP_FreezeQueue();
+  RUN_DEV053_ResetCursor();
+
+  var mid = RUN_DEV053_Status();
+
+  RUN_DEV053_Ingest_Batch_Commit();
+
+  var post = RUN_DEV053_Status();
+
+  Logger.log('[DEV053][E2E] DONE prefix=%s', prefix);
+
+  return {
+    ok: true,
+    prefix: prefix,
+    pre: pre,
+    mid: mid,
+    post: post
+  };
+}
