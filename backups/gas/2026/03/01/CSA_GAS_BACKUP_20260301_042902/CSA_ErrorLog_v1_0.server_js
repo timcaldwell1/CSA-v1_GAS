@@ -1,0 +1,90 @@
+/**
+ * @file_name: CSA_ErrorLogger_v1_0.gs
+ * @title: CSA Error Logger — WebApp Safe
+ * @product: CSA — Church Safety Alerts
+ * @product_version: CSA_v1.1.0
+ * @version: v1.1.0
+ * @created: 2026-01-14
+ * @last_updated: 2026-01-22 16:55 MST
+ *
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV028
+ *
+ * ------------------------------------------------------------
+ * PURPOSE
+ * ------------------------------------------------------------
+ * Centralized error logging utility.
+ *
+ * HARD RULES (ENFORCED):
+ * - NO SpreadsheetApp.getActive()
+ * - NO container assumptions
+ * - WebApp-safe (JSON transport compatible)
+ * - Fail-open: logging must never break execution
+ *
+ * This logger is safe to call from:
+ * - WebApp Router paths
+ * - Data endpoints
+ * - Triggers
+ * - Editor runs
+ * 
+ * //Hygiene candidate identified and neutered 2026-02-19 -Tim
+ * 
+ * ------------------------------------------------------------
+ */
+
+function _ARCHIVE_CSA_LogError_v1_0_(entry) {
+  try {
+    if (!entry || typeof entry !== 'object') return;
+
+    const props = PropertiesService.getScriptProperties();
+    const spreadsheetId = props.getProperty('CSA_SPREADSHEET_ID');
+
+    if (!spreadsheetId) {
+      Logger.log('[CSA_LOG][DROP] Missing CSA_SPREADSHEET_ID');
+      return;
+    }
+
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = ss.getSheetByName('test3_error_log');
+
+    if (!sheet) {
+      Logger.log('[CSA_LOG][DROP] error_log sheet not found');
+      return;
+    }
+
+    const now = new Date();
+    const row = [
+      Utilities.formatDate(now, 'America/Phoenix', 'MM-dd-yyyy hh:mm:ss a z'),
+      entry.env || 'UNKNOWN',
+      entry.source || 'SYSTEM',
+      entry.severity || 'ERROR',
+      entry.error_name || 'UNSPECIFIED',
+      entry.function_name || 'UNKNOWN',
+      entry.message || '',
+      entry.error_details ? JSON.stringify(entry.error_details) : ''
+    ];
+
+    sheet.appendRow(row);
+
+  } catch (err) {
+    // FAIL OPEN — logging must never cascade
+    Logger.log('[CSA_LOG][DROP] Logger exception: ' + err.message);
+  }
+}
+
+/**
+ * Convenience wrapper for Router guard failures.
+ * Contract-pinned: RouterGuardFailure, severity ERROR.
+ */
+function CSA_LogRouterGuardFailure_(details) {
+  CSA_LogError_({
+    env: PropertiesService.getScriptProperties().getProperty('CSA_ENV') || 'UNKNOWN',
+    source: 'ROUTER',
+    severity: 'ERROR',
+    error_name: 'RouterGuardFailure',
+    function_name: 'CSA_Route_',
+    message: 'Mock mode TRUE in PROD; blocked by router guard.',
+    error_details: details || {}
+  });
+}
