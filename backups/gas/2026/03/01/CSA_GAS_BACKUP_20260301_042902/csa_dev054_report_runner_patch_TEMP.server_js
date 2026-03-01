@@ -1,0 +1,97 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_dev054_report_runner_patch_TEMP.gs
+ * @title: TEMP — DEV042 Report Runner Patch (Chunked Logging + Summary)
+ * @product: CSA_v1.0 — Church Safety Alerts
+ * @artifact_namespace: CSA_v1.1 (Documents & Code)
+ * @version: v0.1-DEV054
+ * @status: TEMP — QA SUPPORT ONLY — NOT STABLE
+ * @create_date: 2026-02-26 MST
+ * @last_updated: 2026-02-26 MST
+ * @thread_lineage: DEV041 → DEV042 → DEV053 → DEV054
+ * @authors: Tim Caldwell → DEV054
+ *
+ * TEMP NOTICE:
+ * - Adds new RUN_* entrypoints instead of modifying existing ToolRunner functions.
+ * - Intended to make reports human-usable during batch QA where cursor properties drift.
+ * 
+ * HYGIENE notice, this is a candidate for hygiene consideration. -tim
+ * --------------------------------------------------------------------
+ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED_V2() {
+  return CSA_DEV054__RunDev042Report_({ redacted: true });
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER_V2() {
+  return CSA_DEV054__RunDev042Report_({ redacted: false });
+}
+
+function CSA_DEV054__RunDev042Report_(opts) {
+  opts = opts || {};
+  var redacted = (opts.redacted !== false);
+
+  Logger.log('DEV053 Stable Checkpoint NOT declared.');
+  Logger.log(CSA_DEV041_FormatMST_(new Date()));
+
+  // 1) Run verifier, but do NOT let its output masquerade as “the report”.
+  var verify = null;
+  try {
+    verify = CSA_DEV041_VerifyStableCheckpoint_();
+    Logger.log('[DEV054][REPORT] verifier_ok=%s mismatch_count=%s',
+      String(verify && verify.ok),
+      String(verify && verify.mismatch_count)
+    );
+  } catch (e) {
+    Logger.log('[DEV054][REPORT] verifier_exception=%s', String(e));
+  }
+
+  // 2) Build the report (this is what you actually want).
+  var report = null;
+  try {
+    report = CSA_DEV042_BuildReadOnlyReport_({ redacted: redacted });
+  } catch (e2) {
+    Logger.log('[DEV054][REPORT] build_exception=%s', String(e2));
+    return { ok: false, error: true, error_message: String(e2), verifier: verify };
+  }
+
+  // 3) Always print a short summary that won’t truncate.
+  var propsCount = (report && report.script_properties && report.script_properties.length) ? report.script_properties.length : null;
+  var fnCount = (report && report.functions && report.functions.length) ? report.functions.length : null;
+  var trigCount = (report && report.triggers && report.triggers.length) ? report.triggers.length : 0;
+
+  Logger.log('[DEV054][REPORT][SUMMARY] redacted=%s triggers=%s properties=%s functions=%s',
+    String(redacted),
+    String(trigCount),
+    String(propsCount),
+    String(fnCount)
+  );
+
+  // 4) Print markdown in chunks to avoid Logger truncation.
+  if (report && report.markdown) {
+    CSA_DEV054__LogInChunks_(report.markdown, 1800); // conservative chunk size
+  } else {
+    Logger.log('[DEV054][REPORT] No markdown returned.');
+  }
+
+  return { ok: true, redacted: redacted, verifier: verify, report: report };
+}
+
+function CSA_DEV054__LogInChunks_(text, chunkSize) {
+  chunkSize = chunkSize || 1800;
+  if (!text) return;
+
+  // Prefer existing CSA chunk logger if present.
+  try {
+    if (typeof CSA_LogInChunks_ === 'function') {
+      CSA_LogInChunks_(text);
+      return;
+    }
+  } catch (e) {
+    // fall through to manual chunking
+  }
+
+  for (var i = 0; i < text.length; i += chunkSize) {
+    Logger.log(text.substring(i, i + chunkSize));
+  }
+}
