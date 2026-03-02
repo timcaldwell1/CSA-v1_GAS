@@ -1,0 +1,241 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_ToolRunner_DEV041.gs
+ * @title: CSA ToolRunner (Canonical Operator Surface)
+ * @product: CSA_v1.1 — Church Safety Alerts
+ * @version: v1.1.6-DEV050
+ * @status: ACTIVE — SAFE OPERATOR SURFACE (OBI DISCONNECTED)
+ * @thread_lineage: DEV041 → DEV042 → DEV049 → DEV050
+ * @last_updated (MST): 2026-02-20 19:45 MST
+ * @authors: Tim Caldwell → DEV050
+ *
+ * SAFETY NOTES:
+ * - RUN_HISTORY_CreateProjectVersion() is DISABLED to prevent accidental OBI execution.
+ * - DEV042 report runners chunk-log binder_markdown so the table + inventory appears in Cloud Logs.
+ * --------------------------------------------------------------------
+ */
+
+/* ============================================================
+   SECTION 1 — Stable Checkpoint (DEV041)
+============================================================ */
+
+function RUN_DEV_CaptureStableCheckpointBaseline() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV041_CaptureStableCheckpointBaseline_',
+    [],
+    '[ToolRunner][DEV041][BASELINE]'
+  );
+}
+
+function RUN_PROD_VerifyStableCheckpoint() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV041_VerifyStableCheckpoint_',
+    [],
+    '[ToolRunner][DEV041][VERIFY]'
+  );
+}
+
+/* ============================================================
+   SECTION 2 — DEV042 Diagnostics (Read-only)
+============================================================ */
+
+function RUN_DEV042_VERIFY_DataBridge() {
+  return CSA_CALL_IfExists_(
+    'CSA_VERIFY_DataBridge_',
+    [],
+    '[ToolRunner][DEV042][VERIFY] DataBridge'
+  );
+}
+
+function RUN_DEV042_ContainerBinding_Proof() {
+  return CSA_CALL_IfExists_(
+    'CSA_ProveContainerBinding_',
+    [],
+    '[ToolRunner][DEV042][DIAG] Container Binding Proof'
+  );
+}
+
+/* ============================================================
+   SECTION 3 — DEV042 Read-Only Report (THIS IS YOUR TABLE OUTPUT)
+============================================================ */
+
+function RUN_DEV042_Dump_Props_And_Functions_REDACTED() {
+  if (typeof globalThis.CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = globalThis.CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'REDACTED',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  // Print report body into Cloud Logs
+  var body = (report && report.binder_markdown) ? report.binder_markdown : String(report);
+  CSA_LogInChunks_(body, '[ToolRunner][DEV042][REPORT] ');
+
+  return { ok: true, mode: report.mode || 'REDACTED', generated_at_mst: report.generated_at_mst || null };
+}
+
+function RUN_DEV042_Dump_Props_And_Functions_RAW_NOT_FOR_BINDER() {
+  if (typeof globalThis.CSA_DEV042_BuildReadOnlyReport_ !== 'function') {
+    Logger.log('[ToolRunner][DEV042][REPORT] Missing function: CSA_DEV042_BuildReadOnlyReport_');
+    return { ok: false, reason: 'MISSING_FUNCTION', missing: 'CSA_DEV042_BuildReadOnlyReport_' };
+  }
+
+  var report = globalThis.CSA_DEV042_BuildReadOnlyReport_({
+    mode: 'RAW',
+    include_function_names: true,
+    include_properties: true,
+    include_triggers: true,
+    include_identity: true
+  });
+
+  // Print report body into Cloud Logs
+  var body = (report && report.binder_markdown) ? report.binder_markdown : String(report);
+  CSA_LogInChunks_(body, '[ToolRunner][DEV042][REPORT][RAW] ');
+
+  return { ok: true, mode: report.mode || 'RAW', generated_at_mst: report.generated_at_mst || null };
+}
+
+/* ============================================================
+   SECTION 4 — History (SAFE ONLY)
+============================================================ */
+
+function RUN_HISTORY_CreateProjectVersion() {
+  Logger.log('[ToolRunner][HISTORY][VERSION] DISABLED — must not call OBI.');
+  return { ok: false, reason: 'DISABLED_FOR_SAFETY' };
+}
+
+function RUN_HISTORY_BackupSourceToDrive() {
+  return CSA_CALL_IfExists_(
+    'CSA_Backup_GAS_Source_OnDemand',
+    [],
+    '[ToolRunner][HISTORY][DRIVE_SNAPSHOT]'
+  );
+}
+
+/* ============================================================
+   SECTION 5 — GitHub (DEV049)
+============================================================ */
+
+function RUN_GITHUB_AuthTest_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_Auth_Test_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][AUTH]'
+  );
+}
+
+function RUN_GITHUB_DiagnosePermissions_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_DiagnosePermissions_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][DIAG]'
+  );
+}
+
+function RUN_GITHUB_PushLatestDriveSnapshot_DEV049() {
+  return CSA_CALL_IfExists_(
+    'CSA_GitHub_Push_Latest_GAS_Snapshot_To_GitHub_DEV049_',
+    [],
+    '[ToolRunner][GITHUB][PUSH]'
+  );
+}
+
+/* ============================================================
+   SECTION 6 — DEV049 UOD (Read-only)
+============================================================ */
+
+function RUN_DEV049_UOD_View_Full() {
+  return CSA_CALL_IfExists_(
+    'CSA_UOD_Query_',
+    [{}],
+    '[ToolRunner][DEV049][UOD][FULL]'
+  );
+}
+
+function RUN_DEV049_UOD_Inspect_Debug() {
+  var rows = globalThis.CSA_UOD_Query_ ? globalThis.CSA_UOD_Query_({}) : [];
+  Logger.log('[ToolRunner][DEV049][UOD][DEBUG] Row Count: ' + rows.length);
+  return { ok: true, row_count: rows.length };
+}
+
+/* ============================================================
+   SECTION 7 — DEV050 Diagnostics (Read-only)
+   (Assumes you have CSA_DEV050_Diagnostics_v1_0.gs in project)
+============================================================ */
+
+function RUN_DEV050_E2E_WebApp_Probe() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV050_E2E_WebApp_Probe_',
+    [],
+    '[ToolRunner][DEV050][E2E]'
+  );
+}
+
+function RUN_DEV050_IncidentFlow_Debug() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV050_IncidentFlow_Debug_',
+    [],
+    '[ToolRunner][DEV050][FLOW]'
+  );
+}
+
+function RUN_DEV050_DataBridge_RuntimeProbe() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV050_DataBridge_RuntimeProbe_',
+    [],
+    '[ToolRunner][DEV050][DATABRIDGE]'
+  );
+}
+
+function RUN_DEV050_Probe_IncidentFlow() {
+  return CSA_CALL_IfExists_(
+    'CSA_DEV050_Probe_IncidentFlow_',
+    [],
+    '[ToolRunner][DEV050][PROBE]'
+  );
+}
+
+/* ============================================================
+   INTERNAL HELPERS
+============================================================ */
+
+function CSA_CALL_IfExists_(fnName, args, logPrefix) {
+  try {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+    var fn = g[fnName];
+
+    if (typeof fn !== 'function') {
+      Logger.log((logPrefix || '[ToolRunner]') + ' Missing function: ' + fnName);
+      return { ok: false, reason: 'MISSING_FUNCTION', missing: fnName };
+    }
+
+    Logger.log((logPrefix || '[ToolRunner]') + ' Running: ' + fnName);
+    var result = fn.apply(null, args || []);
+    Logger.log((logPrefix || '[ToolRunner]') + ' Completed: ' + fnName);
+
+    return { ok: true, function: fnName, result: result };
+
+  } catch (e) {
+    Logger.log((logPrefix || '[ToolRunner]') + ' ERROR in ' + fnName + ': ' + String(e));
+    return { ok: false, reason: 'EXCEPTION', function: fnName, error: String(e) };
+  }
+}
+
+function CSA_LogInChunks_(text, prefix) {
+  prefix = prefix || '';
+  var s = String(text || '');
+  if (!s) {
+    Logger.log(prefix + '(empty)');
+    return;
+  }
+  var CHUNK = 3500;
+  for (var i = 0; i < s.length; i += CHUNK) {
+    Logger.log(prefix + s.substring(i, i + CHUNK));
+  }
+}
