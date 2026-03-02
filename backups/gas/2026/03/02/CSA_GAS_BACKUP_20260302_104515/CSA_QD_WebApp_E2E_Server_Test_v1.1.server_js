@@ -1,0 +1,62 @@
+/**
+ * @file_name: CSA_QD_WebApp_E2E_Server_Test_v1.1.gs
+ * @purpose: End-to-end server-side verification of CSA WebApp (/exec)
+ * @scope: Read-only test of deployed WebApp
+ *
+ * What this proves:
+ * 1. We are hitting the correct /exec endpoint
+ * 2. GAS doGet is invoked
+ * 3. Response type and body are visible
+ * 4. Auth wall vs JSON is unambiguous
+ *
+ * Safe to run in PROD.
+ */
+
+/* ===========================
+ * CONFIG — DO NOT EDIT
+ * =========================== */
+/* <= added by Tim
+const CSA_WEBAPP_EXEC_URL =
+  'https://script.google.com/macros/s/AKfycbxoDy5g6z6XNHjLnuJ6WW6Im41toAtbOiUsca1kSshn72Frvn9j4ipL0Y9fkML0zEeU/exec?mode=data';
+
+/* ===========================
+ * ENTRYPOINT
+ * =========================== */
+
+function CSA_QD_WebApp_E2E_Server_Test() {
+  Logger.log('===== CSA WEBAPP E2E SERVER TEST =====');
+  Logger.log('Target URL: ' + CSA_WEBAPP_EXEC_URL);
+
+  try {
+    const response = UrlFetchApp.fetch(CSA_WEBAPP_EXEC_URL, {
+      method: 'get',
+      followRedirects: true,
+      muteHttpExceptions: true
+    });
+
+    const status = response.getResponseCode();
+    const body = response.getContentText();
+
+    Logger.log('HTTP Status: ' + status);
+    Logger.log('Response Length: ' + body.length);
+
+    // Detect auth wall vs JSON
+    if (body.startsWith('<!doctype html') || body.includes('accounts.google.com')) {
+      Logger.log('RESULT: ❌ AUTH WALL / HTML RESPONSE');
+      Logger.log('This means the WebApp is not publicly accessible.');
+    } else if (body.trim().startsWith('{')) {
+      Logger.log('RESULT: ✅ JSON RESPONSE');
+      Logger.log('JSON Preview:');
+      Logger.log(body.substring(0, 1500));
+    } else {
+      Logger.log('RESULT: ⚠️ UNKNOWN RESPONSE TYPE');
+      Logger.log(body.substring(0, 1500));
+    }
+
+  } catch (err) {
+    Logger.log('***** CSA WEBAPP E2E ERROR *****');
+    Logger.log(err.stack || err.toString());
+  }
+
+  Logger.log('===== END CSA WEBAPP E2E TEST =====');
+}
