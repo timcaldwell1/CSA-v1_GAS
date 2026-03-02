@@ -1,0 +1,175 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_DEV052_Capture_Ingest_Tools_v1_4_DEV053.gs
+ * @title: DEV052 — Namespace Provisioning (Patched for test2 keyword_definitions exception)
+ * @product: CSA_v1.1 — Church Safety Alerts
+ * @version: v1.4-DEV053
+ * @status: ACTIVE — DEV052 (compat patch applied by DEV053)
+ * @create_date: 2026-02-09 19:46 MST
+ * @applied 2026-02-26 7:30 AM MST -tim
+ * @last_updated: 2026-02-26
+ * @authors: DEV041, DEV042, DEV054
+ *
+ * @starting_point_declaration:
+ *   Source snapshot: CSA_GAS_BACKUP_20260222_193313.zip
+ *   Patch intent: provisioning compatibility only (no ingest logic changes)
+ *
+ *
+ * @governance_notes:
+ *   - DEV048 ingest harness remains test2-only and uses <prefix>keyword_definitions.
+ *   - test2 keyword sheet exception is governed:
+ *       test2_keyword_definitions (canonical for test2)
+ *   - New lane namespaces (test5/test6/future) use:
+ *       <prefix>_keyword_defs (plural)
+ *   - Provisioner refuses if namespace already exists.
+ *   - Provisioner refuses in CSA_ENV=PROD (THROW).
+ *   - Does NOT mutate CSA_SHEET_PREFIX.
+ * --------------------------------------------------------------------
+ */
+
+var CSA_DEV052 = {
+  TZ: 'America/Phoenix',
+  TEST2_PREFIX: 'test2_',
+
+  // Base sheets required from test2 to clone headers.
+  REQUIRED_TEST2_BASE_SHEETS: [
+    'test2_poc_ingest_queue',
+    'test2_incident_data',
+    'test2_discarded_events',
+    'test2_audit_log',
+    'test2_error_log',
+    'test2_safety_zones'
+  ],
+
+  // test2 keyword sheet exception: prefer definitions, allow defs as fallback.
+  TEST2_KEYWORD_SOURCE_CANDIDATES: [
+    'test2_keyword_definitions',
+    'test2_keyword_defs'
+  ],
+
+  // CoP raw capture headers
+  COP_HEADERS: [
+    '_id',
+    'INCIDENT_NUM',
+    'DISP_CODE',
+    'DISPOSITION',
+    'FINAL_RADIO_CODE',
+    'FINAL_CALL_TYPE',
+    'CALL_RECEIVED',
+    'HUNDREDBLOCKADDR',
+    'GRID'
+  ]
+};
+
+/* ============================================================
+   DEV052 — NAMESPACE PROVISIONER
+============================================================ */
+
+/**
+ * Provisions a full parallel sheet namespace (test5_, test6_, etc.)
+ * Refuses if target sheets already exist.
+ * Validates test2 source sheets before cloning.
+ *
+ * Creates lane keyword sheet as: <prefix>_keyword_defs
+ * (regardless of whether test2 keyword source is keyword_definitions or keyword_defs)
+ *
+ * @param {{prefix:string}} options
+ * @return {{ok:boolean, namespace:string, sheets_created:number, keyword_source_sheet:string}}
+ */
+function CSA_DEV052_ProvisionSheetSet_(options) {
+
+  if (!options || !options.prefix) {
+    throw new Error('[DEV052] prefix required.');
+  }
+
+  CSA_DEV052__assertNotProd_('[DEV052] Refusing to provision namespace in PROD.');
+
+  var rawPrefix = String(options.prefix).trim();
+  var prefix = rawPrefix.replace(/_+$/g, '') + '_';
+
+  var ss = CSA_DEV052__getSpreadsheet_();
+
+  /* 1️⃣ Validate required test2 base sheets exist */
+  CSA_DEV052.REQUIRED_TEST2_BASE_SHEETS.forEach(function(name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) {
+      throw new Error('[DEV052] Missing required source sheet: ' + name);
+    }
+    if (sh.getLastRow() < 1) {
+      throw new Error('[DEV052] Source sheet has no header row: ' + name);
+    }
+  });
+
+  /* 1b️⃣ Validate test2 keyword source sheet (definitions preferred; defs allowed) */
+  var kwSourceName = CSA_DEV052__findFirstExistingSheetName_(ss, CSA_DEV052.TEST2_KEYWORD_SOURCE_CANDIDATES);
+  if (!kwSourceName) {
+    throw new Error('[DEV052] Missing required keyword source sheet. Expected one of: ' +
+                    CSA_DEV052.TEST2_KEYWORD_SOURCE_CANDIDATES.join(', '));
+  }
+  var shKw = ss.getSheetByName(kwSourceName);
+  if (shKw.getLastRow() < 1) {
+    throw new Error('[DEV052] Keyword source sheet has no header row: ' + kwSourceName);
+  }
+
+  /* 2️⃣ Refuse if namespace already exists */
+  var targetSheets = [
+    prefix + 'poc_ingest_queue',
+    prefix + 'incident_data',
+    prefix + 'discarded_events',
+    prefix + 'keyword_defs',
+    prefix + 'audit_log',
+    prefix + 'error_log',
+    prefix + 'safety_zones',
+    prefix + 'cop_calls_raw'
+  ];
+
+  targetSheets.forEach(function(name) {
+    if (ss.getSheetByName(name)) {
+      throw new Error('[DEV052] Namespace already exists. Sheet found: ' + name);
+    }
+  });
+
+  /* 3️⃣ Clone headers from test2 base sheets */
+  CSA_DEV052.REQUIRED_TEST2_BASE_SHEETS.forEach(function(sourceName) {
+    var source = ss.getSheetByName(sourceName);
+    var headers = source.getRange(1, 1, 1, source.getLastColumn()).getValues();
+
+    var targetName = prefix + sourceName.replace(CSA_DEV052.TEST2_PREFIX, '');
+    var target = ss.insertSheet(targetName);
+    target.getRange(1, 1, 1, headers[0].length).setValues(headers);
+  });
+
+  /* 3b️⃣ Clone keyword headers into lane keyword_defs */
+  var kwHeaders = shKw.getRange(1, 1, 1, shKw.getLastColumn()).getValues();
+  var kwTarget = ss.insertSheet(prefix + 'keyword_defs');
+  kwTarget.getRange(1, 1, 1, kwHeaders[0].length).setValues(kwHeaders);
+
+  /* 4️⃣ Create cop_calls_raw sheet */
+  var rawSheet = ss.insertSheet(prefix + 'cop_calls_raw');
+  rawSheet.getRange(1, 1, 1, CSA_DEV052.COP_HEADERS.length)
+          .setValues([CSA_DEV052.COP_HEADERS]);
+
+  Logger.log('[DEV052] Provisioned namespace: ' + prefix + ' (keyword_source=' + kwSourceName + ')');
+
+  return {
+    ok: true,
+    namespace: prefix,
+    sheets_created: targetSheets.length,
+    keyword_source_sheet: kwSourceName
+  };
+}
+
+/* ============================================================
+   INTERNAL HELPERS
+============================================================ */
+
+function CSA_DEV052__getSpreadsheet_() {
+  if (typeof CSA_ENV__getSpreadsheet_ === 'function') {
+    return CSA_ENV__getSpreadsheet_();
+  }
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_DEV052__assertNotProd_(msg) {
+  var props = PropertiesService.getScriptProperties();
+}
