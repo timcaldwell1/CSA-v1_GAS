@@ -1,0 +1,335 @@
+/**
+ * ============================================================================
+ * File Name: CSA_DEV056_AuditLogger_v1_0.gs
+ * Title: DEV056 — Audit Logger + Migration (Prefix-Driven)
+ * Product: CSA_v1.0 — Church Safety Alerts
+ * Artifact Namespace: CSA_v1.1
+ * Version: v1.0
+ * Status: WORKING — DEV056 POC Completion (audit_log contract evolution)
+ * Thread Lineage: DEV048 → DEV050 → DEV055 → DEV056
+ * Last Updated (MST): 2026-03-01
+ * Authors: Tim Caldwell → DEV056-Author (G)
+ *
+ * Description:
+ * - Implements canonical audit_log writer (prefix-driven).
+ * - Provides migration: legacy 7-col audit_log → canonical 10-col audit_log.
+ * - Implements DEV048 safe audit hook: CSA_AUDIT_LogIngestEvent_ (previously missing).
+ * - Append-only. Never mutates ingest logic.
+ *
+ * Canonical 10-column schema (LOCKED ORDER):
+ * 1) id
+ * 2) timestamp_mst
+ * 3) action
+ * 4) status
+ * 5) source
+ * 6) env
+ * 7) prefix
+ * 8) user
+ * 9) run_id
+ * 10) details_json
+ * ============================================================================
+ */
+
+/** @const */
+var CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS = [
+  'id',
+  'timestamp_mst',
+  'action',
+  'status',
+  'source',
+  'env',
+  'prefix',
+  'user',
+  'run_id',
+  'details_json'
+];
+
+/** Legacy 7-column schema (DEV055 baseline) */
+var CSA_DEV056_AUDIT_SCHEMA_V1_HEADERS = [
+  'id',
+  'timestamp',
+  'action',
+  'source',
+  'details',
+  'user',
+  'run_id'
+];
+
+/** Status enum (strict) */
+var CSA_DEV056_AUDIT_STATUS = {
+  SUCCESS: 'SUCCESS',
+  REFUSED: 'REFUSED',
+  ERROR: 'ERROR'
+};
+
+/** Minimal action taxonomy (extend only by decision) */
+var CSA_DEV056_AUDIT_ACTION = {
+  INGEST_START: 'INGEST_START',
+  INGEST_COMPLETE: 'INGEST_COMPLETE',
+  INGEST_REFUSED: 'INGEST_REFUSED',
+  PREFIX_REFUSAL: 'PREFIX_REFUSAL',
+  ENV_REFUSAL: 'ENV_REFUSAL',
+  CHECKPOINT_CAPTURE: 'CHECKPOINT_CAPTURE',
+  CHECKPOINT_VERIFY: 'CHECKPOINT_VERIFY',
+  TOOLRUNNER_INVOKE: 'TOOLRUNNER_INVOKE',
+  NAMESPACE_CREATE: 'NAMESPACE_CREATE',
+  NAMESPACE_REFUSE: 'NAMESPACE_REFUSE'
+};
+
+/**
+ * Canonical Audit Logger (V2).
+ * - Auto-generates run_id if missing, allows override if provided.
+ * - Ensures schema; if legacy schema detected, performs one-time migration then writes.
+ *
+ * @param {string} action - must be a controlled action (or caller-controlled string in PoC)
+ * @param {string} status - SUCCESS | REFUSED | ERROR
+ * @param {string} source - function/module name
+ * @param {Object} detailsObj - metadata; may include run_id
+ * @return {Object} result {ok:boolean, migrated?:boolean, sheet?:string, run_id?:string, error?:string}
+ */
+function CSA_LogAudit_(action, status, source, detailsObj) {
+  try {
+    var ctx = CSA_DEV056__getContext_();
+    var ss = CSA_DEV056__openSpreadsheet_(ctx);
+    var sheetName = ctx.prefix + '_audit_log';
+
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+      CSA_DEV056__setHeader_(sh, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+    }
+
+    var headerState = CSA_DEV056__getHeaderState_(sh);
+
+    // If legacy 7-col detected, migrate (as per your decision B).
+    var migrated = false;
+    if (headerState.isLegacyV1) {
+      CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_(ctx.prefix);
+      migrated = true;
+      // refresh reference after migration
+      sh = ss.getSheetByName(sheetName);
+      headerState = CSA_DEV056__getHeaderState_(sh);
+    }
+
+    if (!headerState.isV2) {
+      // Refuse audit write if schema mismatch (guardrail).
+      CSA_LogError_(
+        new Error('AUDIT_LOG_SCHEMA_MISMATCH: ' + headerState.summary),
+        'CSA_LogAudit_'
+      );
+      return { ok: false, error: 'AUDIT_LOG_SCHEMA_MISMATCH', sheet: sheetName };
+    }
+
+    var runId = (detailsObj && detailsObj.run_id) ? String(detailsObj.run_id) : Utilities.getUuid();
+    var actor = CSA_DEV056__getActor_();
+
+    var payload = {
+      id: Utilities.getUuid(),
+      timestamp_mst: new Date(),
+      action: String(action || ''),
+      status: String(status || ''),
+      source: String(source || ''),
+      env: String(ctx.env || ''),
+      prefix: String(ctx.prefix || ''),
+      user: String(actor || 'SYSTEM'),
+      run_id: runId,
+      details_json: CSA_DEV056__safeJson_(detailsObj || {})
+    };
+
+    sh.appendRow([
+      payload.id,
+      payload.timestamp_mst,
+      payload.action,
+      payload.status,
+      payload.source,
+      payload.env,
+      payload.prefix,
+      payload.user,
+      payload.run_id,
+      payload.details_json
+    ]);
+
+    return { ok: true, migrated: migrated, sheet: sheetName, run_id: runId };
+
+  } catch (e) {
+    // Fail-open: never throw from logger.
+    try {
+      CSA_LogError_(e, 'CSA_LogAudit_');
+    } catch (ignored) {}
+    return { ok: false, error: (e && e.message) ? e.message : String(e) };
+  }
+}
+
+/**
+ * DEV048 safe hook target (previously missing).
+ * DEV048 calls this via globalThis['CSA_AUDIT_LogIngestEvent_'].
+ *
+ * @param {Object} payload - expected keys vary by caller
+ */
+function CSA_AUDIT_LogIngestEvent_(payload) {
+  // Normalize to V2 audit schema with minimal assumptions.
+  var p = payload || {};
+  var action = p.action || p.event || CSA_DEV056_AUDIT_ACTION.TOOLRUNNER_INVOKE;
+  var status = p.status || p.result || CSA_DEV056_AUDIT_STATUS.SUCCESS;
+  var source = p.function_name || p.source || 'DEV048_AUDIT_HOOK';
+
+  // Ensure run_id continuity if provided
+  var details = {
+    run_id: p.run_id || '',
+    message: p.message || '',
+    env: p.env || '',
+    prefix: p.prefix || '',
+    payload: p
+  };
+
+  CSA_LogAudit_(action, status, source, details);
+}
+
+/**
+ * Migration entrypoint (Decision B):
+ * Convert legacy 7-col audit_log rows into canonical 10-col audit_log.
+ *
+ * - Safe: rewrites entire sheet to expanded schema.
+ * - Deterministic: no inference; uses defaults only.
+ *
+ * @param {string=} prefixOverride - optional; defaults to CSA_SHEET_PREFIX
+ * @return {Object} {ok:boolean, sheet:string, migratedRows:number, note?:string, error?:string}
+ */
+function CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_(prefixOverride) {
+  var ctx = CSA_DEV056__getContext_();
+  if (prefixOverride) ctx.prefix = String(prefixOverride);
+
+  try {
+    var ss = CSA_DEV056__openSpreadsheet_(ctx);
+    var sheetName = ctx.prefix + '_audit_log';
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+      CSA_DEV056__setHeader_(sh, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+      return { ok: true, sheet: sheetName, migratedRows: 0, note: 'created_new_sheet' };
+    }
+
+    var state = CSA_DEV056__getHeaderState_(sh);
+
+    if (state.isV2) {
+      return { ok: true, sheet: sheetName, migratedRows: 0, note: 'already_v2' };
+    }
+
+    if (!state.isLegacyV1) {
+      // Unknown schema; refuse migration
+      CSA_LogError_(new Error('AUDIT_LOG_UNKNOWN_SCHEMA: ' + state.summary), 'CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_');
+      return { ok: false, sheet: sheetName, error: 'unknown_schema: ' + state.summary };
+    }
+
+    var dataRange = sh.getDataRange();
+    var values = dataRange.getValues(); // includes header
+    if (!values || values.length === 0) {
+      CSA_DEV056__setHeader_(sh, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+      return { ok: true, sheet: sheetName, migratedRows: 0, note: 'empty_sheet_header_set' };
+    }
+
+    var migrated = [];
+    migrated.push(CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS.slice()); // header row
+
+    // legacy header is row 0; migrate rows 1..N
+    for (var r = 1; r < values.length; r++) {
+      var row = values[r] || [];
+      var legacyId = row[0] || '';
+      var legacyTs = row[1] || '';
+      var legacyAction = row[2] || '';
+      var legacySource = row[3] || '';
+      var legacyDetails = row[4] || '';
+      var legacyUser = row[5] || 'SYSTEM';
+      var legacyRunId = row[6] || '';
+
+      var detailsJson = CSA_DEV056__safeJson_({ details: String(legacyDetails || '') });
+
+      migrated.push([
+        legacyId,
+        legacyTs,
+        legacyAction,
+        CSA_DEV056_AUDIT_STATUS.SUCCESS,
+        legacySource,
+        'DEV',
+        ctx.prefix,
+        legacyUser || 'SYSTEM',
+        legacyRunId,
+        detailsJson
+      ]);
+    }
+
+    sh.clearContents();
+    sh.getRange(1, 1, migrated.length, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS.length).setValues(migrated);
+
+    return { ok: true, sheet: sheetName, migratedRows: Math.max(0, migrated.length - 1) };
+
+  } catch (e) {
+    try { CSA_LogError_(e, 'CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_'); } catch (ignored) {}
+    return { ok: false, sheet: (ctx.prefix + '_audit_log'), error: (e && e.message) ? e.message : String(e) };
+  }
+}
+
+/* =========================
+   Internal helpers
+========================= */
+
+function CSA_DEV056__getContext_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var env = String(props.CSA_ENV || 'DEV').trim();
+  var prefix = String(props.CSA_SHEET_PREFIX || 'test5').trim();
+
+  // normalize: allow 'test5' or 'test5_'
+  if (prefix && prefix.slice(-1) === '_') prefix = prefix.slice(0, -1);
+
+  return {
+    env: env,
+    prefix: prefix,
+    spreadsheetId: String(props.CSA_SPREADSHEET_ID || '').trim()
+  };
+}
+
+function CSA_DEV056__openSpreadsheet_(ctx) {
+  if (!ctx.spreadsheetId) throw new Error('CSA_SPREADSHEET_ID not set.');
+  return SpreadsheetApp.openById(ctx.spreadsheetId);
+}
+
+function CSA_DEV056__getActor_() {
+  try {
+    var email = Session.getActiveUser().getEmail();
+    return email || 'SYSTEM';
+  } catch (e) {
+    return 'SYSTEM';
+  }
+}
+
+function CSA_DEV056__safeJson_(obj) {
+  try {
+    // Ensure run_id is preserved if caller included it
+    return JSON.stringify(obj);
+  } catch (e) {
+    return JSON.stringify({ json_error: true, message: (e && e.message) ? e.message : String(e) });
+  }
+}
+
+function CSA_DEV056__setHeader_(sh, headers) {
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function CSA_DEV056__getHeaderState_(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol === 0) return { isV2: false, isLegacyV1: false, summary: 'empty_sheet' };
+
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+  var norm = header.map(function (v) { return String(v || '').trim(); });
+
+  var v2 = CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS.join('|');
+  var v1 = CSA_DEV056_AUDIT_SCHEMA_V1_HEADERS.join('|');
+
+  var normJoined = norm.join('|');
+
+  return {
+    isV2: (normJoined === v2),
+    isLegacyV1: (normJoined === v1),
+    summary: 'cols=' + norm.length + ' header=' + normJoined
+  };
+}
