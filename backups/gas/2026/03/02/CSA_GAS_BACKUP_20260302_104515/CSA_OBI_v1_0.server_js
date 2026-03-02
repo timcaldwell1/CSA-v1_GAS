@@ -1,0 +1,108 @@
+/**
+ * @file_name: CSA_OBI_v1_0.gs
+ * @title: CSA v1.0.0 One Button Installation
+ * @version: v1.0.0
+ * @Org_date_time: 2025-12-20 12:21 MST
+ * @Last Updated: 2025-12-20 12:21 MST
+ * @authors:
+ *   Tim Caldwell,
+ *   ChatGPT, DEV008
+ *
+ * @description:
+ *   One Button Installer for CSA v1.0.0.
+ *   Asserts product identity, validates required sheets,
+ *   initializes Script Properties, and writes audit evidence.
+ *
+ * @notes:
+ *   - Fail fast
+ *   - Idempotent
+ *   - CSA ≠ CCSA enforced
+ */
+
+function CSA_OBI_Run() {
+  const props = PropertiesService.getScriptProperties();
+
+  try {
+    assertCSAProductIdentity_();
+
+    const cfg = props.getProperties();
+
+    if (!cfg.CSA_SPREADSHEET_ID ||
+        !cfg.CSA_ENV ||
+        !cfg.CSA_MOCK_MODE ||
+        !cfg.CSA_CAMPUS_NAME) {
+      throw new Error('OBI aborted: Missing required Script Properties.');
+    }
+
+    const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+    validateRequiredSheets_(ss);
+
+    const campusId = deriveCampusId_(cfg.CSA_CAMPUS_NAME);
+
+    props.setProperties({
+      CSA_PRODUCT_NAME: 'CSA',
+      CSA_CAMPUS_ID: campusId,
+      CSA_INSTALL_VERSION: 'v1.0.0',
+      CSA_INSTALL_TIMESTAMP: new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }),
+      CSA_INSTALL_STATUS: 'PASS',
+      CSA_PROJECT_ID: ScriptApp.getScriptId()
+    }, true);
+
+    writeAuditRow_(ss, 'PASS', 'OBI completed successfully.');
+
+  } catch (err) {
+    props.setProperty('CSA_INSTALL_STATUS', 'FAIL');
+    throw err;
+  }
+}
+
+function assertCSAProductIdentity_() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+
+  if (props.PRODUCT_NAME && props.PRODUCT_NAME !== 'CSA') {
+    throw new Error('OBI aborted: Foreign PRODUCT_NAME detected.');
+  }
+
+  Object.keys(props).forEach(k => {
+    if (k.startsWith('CCSA_')) {
+      throw new Error(`OBI aborted: Foreign namespace detected (${k}).`);
+    }
+  });
+}
+
+function deriveCampusId_(campusName) {
+  return Utilities.base64Encode(
+    Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      campusName.trim().toLowerCase()
+    )
+  ).substring(0, 12);
+}
+
+function validateRequiredSheets_(ss) {
+  const required = [
+    'test3_incident_data',
+    'test3_keywords',
+    'test3_safety_zones',
+    'test3_error_log',
+    'test3_audit_log'
+  ];
+
+  const existing = ss.getSheets().map(s => s.getName());
+
+  required.forEach(name => {
+    if (!existing.includes(name)) {
+      throw new Error(`Missing required sheet: ${name}`);
+    }
+  });
+}
+
+function writeAuditRow_(ss, status, message) {
+  const sheet = ss.getSheetByName('test3_audit_log');
+  sheet.appendRow([
+    new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }),
+    'CSA_OBI_Run',
+    status,
+    message
+  ]);
+}
