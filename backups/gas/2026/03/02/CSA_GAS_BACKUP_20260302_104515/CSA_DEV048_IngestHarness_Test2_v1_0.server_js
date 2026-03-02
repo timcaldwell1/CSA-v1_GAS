@@ -1,0 +1,606 @@
+/**
+ * file_name: CSA_DEV048_IngestHarness_Test2_v1_0.gs
+ * title: DEV048 Historical Ingest Harness (Test2 Only)
+ * product: CSA_v1.0 — Church Safety Alerts
+ * version: 1.0
+ * status: DEPRECATED — HISTORICAL STABLE CHECKPOINT
+ * thread_lineage: DEV047 → DEV048
+ * deprecated_by: DEV053 Generic Ingest Harness
+ * last_updated: 2026-02-23 10:15 AM MST
+ *
+ * DEPRECATION NOTICE:
+ * ------------------------------------------------------------
+ * This module is preserved as a historical stable checkpoint.
+ * It is hard-bound to the test2_ sheet set.
+ *
+ * DO NOT MODIFY.
+ *
+ * Active ingest surface has moved to:
+ *   CSA_DEV053_GenericIngest_v1_0.gs
+ *
+ * Hygiene Notes:
+ * - No further logic changes permitted.
+ * - Retained for audit / rollback only.
+ * - ToolRunner wrappers may be commented out.-tim 2026-02-23 10:15 AM MST
+ * -------status: DEPRECATED — TEST2 SURFACE RETIRED-------DEV053 -
+ */
+
+/** ToolRunner entrypoint: commit mode (writes outputs). */
+function CSA_DEV048_Run_Test2_IngestHarness_() {
+  return CSA_DEV048_RunIngestHarness_({ dry_run: false });
+}
+
+/** ToolRunner entrypoint: dry-run mode (no writes; logs decisions). */
+function CSA_DEV048_Run_Test2_IngestHarness_DryRun_() {
+  return CSA_DEV048_RunIngestHarness_({ dry_run: true });
+}
+
+/**
+ * Core runner.
+ * @param {{dry_run?:boolean}} options
+ * @return {Object} stats summary
+ */
+function CSA_DEV048_RunIngestHarness_(options) {
+  options = options || {};
+  var dryRun = String(options.dry_run).toUpperCase() === 'TRUE';
+
+  var started = new Date();
+  var runId = 'DEV048_' + started.getTime();
+
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var env = String(props.CSA_ENV || '').toUpperCase();
+
+  // --- Guardrails: ENV ---
+  //HARDCODED PROD block (explicit environment restriction)
+  if (env === 'PROD') {
+    CSA_DEV048_GuardFailure_('Refused: CSA_ENV=PROD. Harness is test2-only.', {
+      run_id: runId,
+      env: env,
+      prefix: props.CSA_SHEET_PREFIX
+    });
+    return {
+      ok: false,
+      run_id: runId,
+      env: env,
+      prefix: props.CSA_SHEET_PREFIX,
+      error: 'REFUSED_ENV_PROD'
+    };
+  }
+
+  // --- Guardrails: Prefix must be explicit, normalized, and test2-only ---
+  var rawPrefix = String(props.CSA_SHEET_PREFIX || '');
+  if (!rawPrefix) {
+    CSA_DEV048_GuardFailure_('Refused: CSA_SHEET_PREFIX missing. Set it to test2 or test2_.', {
+      run_id: runId,
+      env: env
+    });
+    return {
+      ok: false,
+      run_id: runId,
+      env: env,
+      prefix: rawPrefix,
+      error: 'MISSING_PREFIX'
+    };
+  }
+
+  var prefix = CSA_DEV048_NormalizeSheetPrefix_(rawPrefix);
+
+  //HARDCODED test2_ sandbox restriction (PoC isolation)
+  if (prefix !== 'test2_') {
+    CSA_DEV048_GuardFailure_(
+      'Refused: CSA_SHEET_PREFIX must resolve to test2_. ' +
+      'Saw raw="' + rawPrefix + '" normalized="' + prefix + '".',
+      { run_id: runId, env: env, prefix: rawPrefix }
+    );
+    return {
+      ok: false,
+      run_id: runId,
+      env: env,
+      prefix: rawPrefix,
+      normalized_prefix: prefix,
+      error: 'REFUSED_PREFIX_NOT_TEST2'
+    };
+  }
+
+  //HARDCODED default risk model version fallback
+  var riskModelVersion = String(props.CSA_RISK_MODEL_VERSION || 'v1.0');
+
+  // OPTION B: Campus fallback (prevents Laveen vs * drift)
+  var campusDefault = CSA_DEV048_GetCampusDefault_(props);
+
+  var ss = CSA_DEV048_OpenSpreadsheet_();
+
+  // Sheets per contract
+  var shQueue = CSA_DEV048_GetSheetRequired_(ss, prefix + 'poc_ingest_queue');
+  var shKw = CSA_DEV048_GetSheetRequired_(ss, prefix + 'keyword_definitions');
+  var shInc = CSA_DEV048_GetSheetRequired_(ss, prefix + 'incident_data');
+  var shDisc = CSA_DEV048_GetSheetRequired_(ss, prefix + 'discarded_events');
+
+  // Validate headers exist (required columns)
+  var queueHdr = CSA_DEV048_ReadHeader_(shQueue);
+  var kwHdr = CSA_DEV048_ReadHeader_(shKw);
+  var incHdr = CSA_DEV048_ReadHeader_(shInc);
+  var discHdr = CSA_DEV048_ReadHeader_(shDisc);
+
+  var queueIdx = CSA_DEV048_IndexRequired_(queueHdr, [
+    'incident_id', 'incident_type', 'description', 'location', 'RawPubDate'
+  ], 'QUEUE_HEADERS');
+
+  var kwIdx = CSA_DEV048_IndexRequired_(kwHdr, [
+    'keyword', 'taxonomy_class', 'base_weight', 'active', 'campus', 'notes'
+  ], 'KEYWORD_DEFS_HEADERS');
+
+  var incIdx = CSA_DEV048_IndexRequired_(incHdr, [
+    'incident_id', 'incident_type', 'description', 'matched_keywords',
+    'risk_level', 'risk_label', 'campus', 'timestamp', 'RawPubDate', 'risk_model_version'
+  ], 'INCIDENT_DATA_HEADERS');
+
+  var discIdx = CSA_DEV048_IndexRequired_(discHdr, [
+    'incident_id', 'stage', 'reason_code', 'trigger', 'campus', 'timestamp'
+  ], 'DISCARDED_EVENTS_HEADERS');
+
+  // Load keyword definitions (active only)
+  var kwDefs = CSA_DEV048_LoadKeywordDefs_(shKw, kwHdr, kwIdx);
+  var signalMatchers = kwDefs.signal;
+  var negMatchers = kwDefs.negation;
+
+  // Read queue rows (display values preserves RawPubDate verbatim-ish)
+  var queueData = CSA_DEV048_ReadDataDisplay_(shQueue);
+  var queueRows = queueData.rows; // excludes header
+  var totalCandidate = 0;
+
+  var includeCount = 0;
+  var discardCount = 0;
+  var skippedCount = 0;
+  var errorCount = 0;
+
+  Logger.log('[DEV048][RUN] run_id=%s env=%s raw_prefix=%s prefix=%s dry_run=%s risk_model_version=%s',
+             runId, env || '(blank)', rawPrefix, prefix, dryRun, riskModelVersion);
+  Logger.log('[DEV048][CFG] SIGNAL=%s NEGATION=%s campus_default=%s',
+             signalMatchers.length, negMatchers.length, campusDefault);
+
+  for (var i = 0; i < queueRows.length; i++) {
+    var r = queueRows[i];
+
+    try {
+      var incidentId = CSA_DEV048_Cell_(r, queueIdx.incident_id);
+      if (!incidentId) {
+        skippedCount++;
+        continue;
+      }
+      totalCandidate++;
+
+      var incidentType = CSA_DEV048_Cell_(r, queueIdx.incident_type);
+      var description = CSA_DEV048_Cell_(r, queueIdx.description);
+      var location = CSA_DEV048_Cell_(r, queueIdx.location);
+      var rawPubDate = CSA_DEV048_Cell_(r, queueIdx.RawPubDate); // preserve verbatim from queue display
+
+      var normText = CSA_DEV048_NormalizeText_((incidentType || '') + ' ' + (description || ''));
+        //CORRECTION BY TIM //
+        //Per DEV048=I added a close ) in line 196 second to the last CHR -tim
+        // 
+        
+      // Match SIGNAL and NEGATION
+      var signals = CSA_DEV048_FindMatches_(normText, signalMatchers);
+      var negs = CSA_DEV048_FindMatches_(normText, negMatchers);
+
+      if (signals.length < 1) {
+        // DISCARD stage=KEYWORD
+        var reason = (negs.length >= 1) ? 'NEGATION_NO_SIGNAL' : 'NO_SIGNAL';
+        var trigger = (negs.length >= 1) ? negs[0] : '';
+
+        if (dryRun) {
+          Logger.log('[DEV048][DRY][DISCARD] id=%s reason=%s trigger=%s', incidentId, reason, trigger);
+        } else {
+          CSA_DEV048_SafeAuditHook_({
+            run_id: runId,
+            function_name: 'CSA_DEV048_RunIngestHarness_',
+            status: 'WILL_APPEND_DISCARD',
+            message: 'Appending discard row (stage=KEYWORD).',
+            incident_id: incidentId,
+            reason_code: reason
+          });
+
+          var discRow = CSA_DEV048_BuildDiscardRow_(discHdr, discIdx, {
+            incident_id: incidentId,
+            stage: 'KEYWORD',
+            reason_code: reason,
+            trigger: trigger,
+            campus: campusDefault,
+            timestamp: CSA_DEV048_NowMstIso_()
+          });
+          shDisc.appendRow(discRow);
+        }
+
+        discardCount++;
+        continue;
+      }
+
+      // Geofence gate (PoC mocked/pass)
+      //HARDCODED PoC geofence bypass (future contract point)
+      var geofencePass = true;
+
+      if (!geofencePass) {
+        if (!dryRun) {
+          CSA_DEV048_SafeAuditHook_({
+            run_id: runId,
+            function_name: 'CSA_DEV048_RunIngestHarness_',
+            status: 'WILL_APPEND_DISCARD',
+            message: 'Appending discard row (stage=GEOFENCE).',
+            incident_id: incidentId,
+            reason_code: 'NO_ZONE_MATCH'
+          });
+          var discRow2 = CSA_DEV048_BuildDiscardRow_(discHdr, discIdx, {
+            incident_id: incidentId,
+            stage: 'GEOFENCE',
+            reason_code: 'NO_ZONE_MATCH',
+            trigger: '',
+            campus: campusDefault,
+            timestamp: CSA_DEV048_NowMstIso_()
+          });
+          shDisc.appendRow(discRow2);
+        }
+        discardCount++;
+        continue;
+      }
+
+      // INCLUDE: compute risk
+      //HARDCODED PoC risk multiplier (5 × SIGNAL_count) and cap at 10
+      var riskLevel = Math.min(10, 5 * signals.length);
+      var riskLabel = CSA_DEV048_RiskLabel_(riskLevel);
+
+      if (dryRun) {
+        Logger.log('[DEV048][DRY][INCLUDE] id=%s risk=%s %s keywords=%s', incidentId, riskLevel, riskLabel, signals.join(','));
+      } else {
+        CSA_DEV048_SafeAuditHook_({
+          run_id: runId,
+          function_name: 'CSA_DEV048_RunIngestHarness_',
+          status: 'WILL_APPEND_INCIDENT',
+          message: 'Appending incident row (append-only).',
+          incident_id: incidentId,
+          risk_level: riskLevel,
+          risk_label: riskLabel
+        });
+
+        var incRow = CSA_DEV048_BuildIncidentRow_(incHdr, incIdx, {
+          incident_id: incidentId,
+          incident_type: incidentType,
+          description: description,
+          location: location,
+          matched_keywords: signals.join(','),
+          risk_level: riskLevel,
+          risk_label: riskLabel,
+          campus: campusDefault,
+          timestamp: CSA_DEV048_NowMstIso_(),
+          RawPubDate: rawPubDate,
+          risk_model_version: riskModelVersion
+        });
+        shInc.appendRow(incRow);
+      }
+
+      includeCount++;
+
+    } catch (err) {
+      errorCount++;
+
+      CSA_DEV048_SafeErrorHook_(err, {
+        run_id: runId,
+        function_name: 'CSA_DEV048_RunIngestHarness_',
+        stage: 'INGEST_ROW',
+        row_index_1_based: (i + 2),
+        prefix: prefix
+      });
+
+      Logger.log('[DEV048][ERR] row=%s msg=%s', (i + 2), (err && err.message ? err.message : err));
+    }
+  }
+
+  var finished = new Date();
+  var durationMs = finished.getTime() - started.getTime();
+
+  var balanceOk = (includeCount + discardCount) === totalCandidate;
+
+  Logger.log('[DEV048][DONE] run_id=%s candidates=%s include=%s discard=%s skipped=%s errors=%s balance_ok=%s dur_ms=%s',
+             runId, totalCandidate, includeCount, discardCount, skippedCount, errorCount, balanceOk, durationMs);
+
+  return {
+    ok: true,
+    run_id: runId,
+    env: env,
+    raw_prefix: rawPrefix,
+    prefix: prefix,
+    dry_run: dryRun,
+    risk_model_version: riskModelVersion,
+    campus_default: campusDefault,
+    candidates: totalCandidate,
+    included: includeCount,
+    discarded: discardCount,
+    skipped_blank_id: skippedCount,
+    errors: errorCount,
+    balance_ok: balanceOk,
+    duration_ms: durationMs
+  };
+}
+
+/**
+ * Normalize CSA_SHEET_PREFIX to a sheet-name prefix.
+ * - Trims whitespace
+ * - Ensures exactly one trailing underscore
+ */
+function CSA_DEV048_NormalizeSheetPrefix_(raw) {
+  var p = String(raw || '').trim();
+  if (!p) return '';
+  p = p.replace(/_+$/g, '');
+  return p + '_';
+}
+
+/**
+ * OPTION B: resolve campus default consistently across property-name drift.
+ * Order:
+ *  1) CSA_CAMPUS
+ *  2) CSA_CAMPUS_NAME
+ *  3) '*'
+ */
+function CSA_DEV048_GetCampusDefault_(props) {
+  var v1 = String((props && props.CSA_CAMPUS) || '').trim();
+  if (v1) return v1;
+
+  var v2 = String((props && props.CSA_CAMPUS_NAME) || '').trim();
+  if (v2) return v2;
+
+  //HARDCODED fallback campus wildcard for PoC
+  return '*';
+}
+
+/* =========================
+ * Helpers — Spreadsheet
+ * ========================= */
+
+function CSA_DEV048_OpenSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+  try {
+    if (ssId) return SpreadsheetApp.openById(ssId);
+  } catch (e) {}
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_DEV048_GetSheetRequired_(ss, name) {
+  var sh = ss.getSheetByName(name);
+  if (!sh) throw new Error('Missing required sheet: ' + name);
+  return sh;
+}
+
+function CSA_DEV048_ReadHeader_(sheet) {
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  var hdr = sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+  for (var i = 0; i < hdr.length; i++) hdr[i] = String(hdr[i] || '').trim();
+  return hdr;
+}
+
+function CSA_DEV048_ReadDataDisplay_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  if (lastRow < 2) return { rows: [] };
+  var rng = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  return { rows: rng.getDisplayValues() };
+}
+
+/* =========================
+ * Helpers — Header indexing
+ * ========================= */
+
+function CSA_DEV048_IndexRequired_(headerRow, requiredCols, label) {
+  var map = {};
+  var normToIdx = {};
+  for (var c = 0; c < headerRow.length; c++) {
+    var norm = CSA_DEV048_NormHeader_(headerRow[c]);
+    if (norm) normToIdx[norm] = c;
+  }
+
+  for (var i = 0; i < requiredCols.length; i++) {
+    var col = requiredCols[i];
+    var key = String(col);
+    var normKey = CSA_DEV048_NormHeader_(key);
+    if (typeof normToIdx[normKey] !== 'number') {
+      throw new Error('Missing required column (' + label + '): ' + key);
+    }
+    map[key] = normToIdx[normKey];
+  }
+
+  map.incident_id = normToIdx['incident_id'];
+  map.incident_type = normToIdx['incident_type'];
+  map.description = normToIdx['description'];
+  map.location = normToIdx['location'];
+  map.RawPubDate = normToIdx['rawpubdate'] !== undefined ? normToIdx['rawpubdate'] : normToIdx['raw_pub_date'];
+
+  return map;
+}
+
+function CSA_DEV048_NormHeader_(h) {
+  var s = String(h || '').trim().toLowerCase();
+  s = s.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return s;
+}
+
+function CSA_DEV048_Cell_(row, idx) {
+  if (typeof idx !== 'number' || idx < 0 || idx >= row.length) return '';
+  return String(row[idx] || '').trim();
+}
+
+/* =========================
+ * Helpers — Keyword defs
+ * ========================= */
+
+function CSA_DEV048_LoadKeywordDefs_(shKw, kwHdr, kwIdx) {
+  var data = CSA_DEV048_ReadDataDisplay_(shKw).rows;
+  var signal = [];
+  var negation = [];
+  var seen = {};
+
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    var keywordRaw = CSA_DEV048_Cell_(r, kwIdx.keyword);
+    if (!keywordRaw) continue;
+
+    var taxonomy = String(CSA_DEV048_Cell_(r, kwIdx.taxonomy_class)).toUpperCase();
+    var active = CSA_DEV048_Cell_(r, kwIdx.active);
+
+    if (!CSA_DEV048_IsTruthy_(active)) continue;
+    if (taxonomy !== 'SIGNAL' && taxonomy !== 'NEGATION') continue;
+
+    var keywordNorm = CSA_DEV048_NormalizeText_(keywordRaw);
+    if (!keywordNorm) continue;
+
+    var key = taxonomy + '|' + keywordNorm;
+    if (seen[key]) continue;
+    seen[key] = true;
+
+    var rx = CSA_DEV048_CompileKeywordRegex_(keywordNorm);
+    var entry = { keyword: keywordNorm, regex: rx };
+
+    if (taxonomy === 'SIGNAL') signal.push(entry);
+    else negation.push(entry);
+  }
+
+  return { signal: signal, negation: negation };
+}
+
+function CSA_DEV048_IsTruthy_(v) {
+  var s = String(v || '').trim().toUpperCase();
+  return (s === 'Y' || s === 'YES' || s === 'TRUE' || s === '1');
+}
+
+function CSA_DEV048_CompileKeywordRegex_(keywordNorm) {
+  var escaped = keywordNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  escaped = escaped.replace(/\s+/g, '\\s+');
+  return new RegExp('\\b' + escaped + '\\b');
+}
+
+function CSA_DEV048_FindMatches_(normText, matcherList) {
+  var hits = [];
+  for (var i = 0; i < matcherList.length; i++) {
+    var m = matcherList[i];
+    if (m.regex.test(normText)) hits.push(m.keyword);
+  }
+  return hits;
+}
+
+/* =========================
+ * Helpers — Normalization & risk
+ * ========================= */
+
+function CSA_DEV048_NormalizeText_(s) {
+  var t = String(s || '').toLowerCase();
+  t = t.replace(/[^a-z0-9]+/g, ' ');
+  t = t.replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+function CSA_DEV048_RiskLabel_(riskLevel) {
+  var n = Number(riskLevel) || 0;
+
+  //HARDCODED PoC risk label thresholds
+  if (n >= 10) return 'CRITICAL';
+  if (n >= 7) return 'HIGH';
+  if (n >= 4) return 'ELEVATED';
+  if (n >= 1) return 'LOW';
+  return 'INFO';
+}
+
+function CSA_DEV048_NowMstIso_() {
+  //HARDCODED fixed MST timezone
+  return Utilities.formatDate(new Date(), 'America/Phoenix', "yyyy-MM-dd HH:mm:ss 'MST'");
+}
+
+/* =========================
+ * Row builders (header-aligned)
+ * ========================= */
+
+function CSA_DEV048_BuildIncidentRow_(incHdr, incIdx, obj) {
+  var row = new Array(incHdr.length);
+  for (var i = 0; i < row.length; i++) row[i] = '';
+
+  CSA_DEV048_SetByHeader_(row, incHdr, 'incident_id', obj.incident_id);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'incident_type', obj.incident_type);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'description', obj.description);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'matched_keywords', obj.matched_keywords);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'risk_level', obj.risk_level);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'risk_label', obj.risk_label);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'campus', obj.campus);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'timestamp', obj.timestamp);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'RawPubDate', obj.RawPubDate);
+  CSA_DEV048_SetByHeader_(row, incHdr, 'risk_model_version', obj.risk_model_version);
+
+  CSA_DEV048_SetByHeader_(row, incHdr, 'location', obj.location);
+  return row;
+}
+
+function CSA_DEV048_BuildDiscardRow_(discHdr, discIdx, obj) {
+  var row = new Array(discHdr.length);
+  for (var i = 0; i < row.length; i++) row[i] = '';
+
+  CSA_DEV048_SetByHeader_(row, discHdr, 'incident_id', obj.incident_id);
+  CSA_DEV048_SetByHeader_(row, discHdr, 'stage', obj.stage);
+  CSA_DEV048_SetByHeader_(row, discHdr, 'reason_code', obj.reason_code);
+  CSA_DEV048_SetByHeader_(row, discHdr, 'trigger', obj.trigger);
+  CSA_DEV048_SetByHeader_(row, discHdr, 'campus', obj.campus);
+  CSA_DEV048_SetByHeader_(row, discHdr, 'timestamp', obj.timestamp);
+
+  return row;
+}
+
+function CSA_DEV048_SetByHeader_(row, hdr, colName, value) {
+  var targetNorm = CSA_DEV048_NormHeader_(colName);
+  for (var i = 0; i < hdr.length; i++) {
+    if (CSA_DEV048_NormHeader_(hdr[i]) === targetNorm) {
+      row[i] = (value === undefined || value === null) ? '' : value;
+      return;
+    }
+  }
+}
+
+/* =========================
+ * Hook scaffolds (safe/no-throw)
+ * ========================= */
+
+function CSA_DEV048_GuardFailure_(message, ctx) {
+  Logger.log('[DEV048][GUARD_FAIL] %s', message);
+
+  CSA_DEV048_SafeAuditHook_({
+    run_id: (ctx && ctx.run_id) || '',
+    function_name: 'CSA_DEV048_RunIngestHarness_',
+    status: 'ROUTER_GUARD_FAILURE',
+    message: message,
+    env: (ctx && ctx.env) || '',
+    prefix: (ctx && ctx.prefix) || ''
+  });
+}
+
+function CSA_DEV048_SafeAuditHook_(payload) {
+  try {
+    var fn = (typeof globalThis !== 'undefined') ? globalThis['CSA_AUDIT_LogIngestEvent_'] : null;
+    if (typeof fn === 'function') fn(payload);
+  } catch (e) {
+    Logger.log('[DEV048][AUDIT_HOOK_ERR] %s', (e && e.message ? e.message : e));
+  }
+}
+
+function CSA_DEV048_SafeErrorHook_(err, ctx) {
+  try {
+    var payload = {
+      error_message: (err && err.message) ? err.message : String(err),
+      stack: (err && err.stack) ? String(err.stack) : '',
+      context: ctx || {}
+    };
+
+    var fn1 = (typeof globalThis !== 'undefined') ? globalThis['CSA_LogException_'] : null;
+    var fn2 = (typeof globalThis !== 'undefined') ? globalThis['CSA_ERROR_LogException_'] : null;
+
+    if (typeof fn1 === 'function') fn1(payload);
+    if (typeof fn2 === 'function') fn2(payload);
+
+  } catch (e) {
+    Logger.log('[DEV048][ERROR_HOOK_ERR] %s', (e && e.message ? e.message : e));
+  }
+}
