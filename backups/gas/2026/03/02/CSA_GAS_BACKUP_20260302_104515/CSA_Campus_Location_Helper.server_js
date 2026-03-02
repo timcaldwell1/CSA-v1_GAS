@@ -1,0 +1,107 @@
+/**
+ * @file_name: CSA_Campus_Location_Helper.gs
+ * @title: CSA Campus Location Helper
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-06
+ * @Last Updated: 2026-01-22 14:10 MST
+ *
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV013
+ *   ChatGPT, DEV028
+ *
+ * @description:
+ *   Read-only helper to retrieve canonical campus latitude/longitude
+ *   from the test3_safety_zones sheet.
+ *
+ *   PATCH (DEV028):
+ *   - Replaced SpreadsheetApp.getActive() with openById()
+ *   - Makes helper safe for WebApp execution
+ *   - Uses CSA_SPREADSHEET_ID from Script Properties
+ *
+ *   Applies to:
+ *     - WebApp runtime
+ *     - QA / mock data generation
+ *     - Production defaults when MOCK_MODE = FALSE
+ *
+ * @notes:
+ *   - Read-only
+ *   - No schema changes
+ *   - No UI logic
+ *   - Fail-fast on malformed or missing data
+ */
+
+function CSA_GetActiveCampusLatLng_() {
+  const SHEET_NAME = 'test3_safety_zones';
+  const TARGET_ZONE_NAME = 'Laveen'; // logical campus identifier
+
+  // ---- WebApp-safe spreadsheet resolution ----
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const spreadsheetId = props.CSA_SPREADSHEET_ID;
+
+  if (!spreadsheetId) {
+    throw new Error(
+      'CSA_GetActiveCampusLatLng_: CSA_SPREADSHEET_ID missing from Script Properties'
+    );
+  }
+
+  const ss = SpreadsheetApp.openById(spreadsheetId);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    throw new Error('CSA_GetActiveCampusLatLng_: Sheet not found: ' + SHEET_NAME);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) {
+    throw new Error('CSA_GetActiveCampusLatLng_: No zone data rows present');
+  }
+
+  const header = values[0];
+  const rows = values.slice(1);
+
+  const idx = {
+    zone_name: header.indexOf('zone_name'),
+    center_lat: header.indexOf('center_lat'),
+    center_lon: header.indexOf('center_lon'),
+    active: header.indexOf('active')
+  };
+
+  // Validate required columns
+  Object.keys(idx).forEach(function (k) {
+    if (idx[k] === -1) {
+      throw new Error(
+        'CSA_GetActiveCampusLatLng_: Missing required column: ' + k
+      );
+    }
+  });
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+
+    if (
+      r[idx.zone_name] === TARGET_ZONE_NAME &&
+      String(r[idx.active]).toUpperCase() === 'TRUE'
+    ) {
+      const lat = Number(r[idx.center_lat]);
+      const lng = Number(r[idx.center_lon]);
+
+      if (!isFinite(lat) || !isFinite(lng)) {
+        throw new Error(
+          'CSA_GetActiveCampusLatLng_: Invalid lat/lng for zone ' +
+            TARGET_ZONE_NAME
+        );
+      }
+
+      return {
+        zone_name: r[idx.zone_name],
+        lat: lat,
+        lng: lng
+      };
+    }
+  }
+
+  throw new Error(
+    'CSA_GetActiveCampusLatLng_: Active campus not found for zone: ' +
+      TARGET_ZONE_NAME
+  );
+}
