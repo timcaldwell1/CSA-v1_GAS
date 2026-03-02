@@ -1,0 +1,249 @@
+/**
+ * @file_name: CSA_DataBridge_v1_3_1_DEV032.gs
+ * @title: CSA Data Bridge — Header-Tolerant Incident Loader (DEV034 Timestamp Fields)
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.3.3-DEV034
+ * @Org_date_time: 2026-01-25 10:45 MST
+ * @Last Updated: 2026-01-29 12:10 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *   ChatGPT, DEV034 / DEV036
+ *
+ * PURPOSE
+ * -------
+ * Read-only incident retrieval with tolerant header resolution.
+ * Fail-open by design.
+ *
+ * DEV034 PHASE 1
+ * --------------
+ * Payload-only additions per incident:
+ *   - timestamp_epoch_ms (derived from timestamp_sort epoch ms)
+ *   - timestamp_tz = "America/Phoenix"
+ *
+ * CONSTRAINTS
+ * -----------
+ * - No router changes
+ * - No sheet schema changes required
+ * - No payload field removals/renames
+ * - No parsing of timestamp_display / timestamp_iso for truth
+ */
+
+function _ARCHIVE_CSA_GetIncidentData_v1_3_1_(requestId) {
+  const props = PropertiesService.getScriptProperties();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE') || 'FALSE').toUpperCase();
+  const cfg = CSA_GetConfig_();
+
+  // Resolve incident sheet name
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+  const INCIDENT_SHEET_NAME =
+    (!prefix || prefix === 'incident')
+      ? 'incident_data'
+      : String(prefix) + '_incident_data';
+
+  // ----------------------------
+  // MOCK MODE (guarded)
+  // ----------------------------
+  if (mockMode === 'TRUE') {
+    try {
+      if (typeof CSA_DEV012_GenerateMockIncidents_ !== 'function') {
+        return {
+          campus: cfg.CSA_CAMPUS_NAME,
+          count: 0,
+          incidents: [],
+          source: 'MOCK',
+          error: true,
+          error_message: 'Mock mode enabled but CSA_DEV012_GenerateMockIncidents_ is not defined.'
+        };
+      }
+
+      const incidentsRaw = CSA_DEV012_GenerateMockIncidents_(cfg);
+      const normalized = CSA_NormalizeIncidents_(incidentsRaw);
+      const withDev034 = CSA_ApplyDev034TimestampFields_(normalized);
+
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: withDev034.length,
+        incidents: withDev034,
+        source: 'MOCK',
+        error: false
+      };
+    } catch (err) {
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'MOCK',
+        error: true,
+        error_message: String(err && err.message ? err.message : err)
+      };
+    }
+  }
+
+  // ----------------------------
+  // SHEET MODE
+  // ----------------------------
+  try {
+    const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+    if (!sheet) {
+      throw new Error('Incident sheet not found: ' + INCIDENT_SHEET_NAME);
+    }
+
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) {
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'SHEET',
+        error: false
+      };
+    }
+
+    const headers = values.shift();
+    const hmap = CSA_BuildHeaderMap_(headers);
+
+    const idx = {
+      id: CSA_IndexOfAny_(hmap, ['id', 'id_a']),
+      incident_type: CSA_IndexOfAny_(hmap, ['incident_type', 'type', 'category']),
+      description: CSA_IndexOfAny_(hmap, ['description', 'details']),
+      latitude: CSA_IndexOfAny_(hmap, ['latitude', 'lat']),
+      longitude: CSA_IndexOfAny_(hmap, ['longitude', 'lon', 'lng', 'long']),
+      timestamp_display: CSA_IndexOfAny_(hmap, ['timestamp_display']),
+      timestamp_iso: CSA_IndexOfAny_(hmap, ['timestamp_iso']),
+      timestamp_sort: CSA_IndexOfAny_(hmap, ['timestamp_sort'])
+    };
+
+    const incidents = [];
+
+    values.forEach((row, r) => {
+      const rec = {
+        id_a: CSA_ReadCell_(row, idx.id, r, 'id'),
+        incident_type: CSA_ReadCell_(row, idx.incident_type, r, 'incident_type'),
+        description: CSA_ReadCell_(row, idx.description, r, 'description'),
+        latitude: CSA_ToNumber_(CSA_ReadCell_(row, idx.latitude, r, 'latitude')),
+        longitude: CSA_ToNumber_(CSA_ReadCell_(row, idx.longitude, r, 'longitude')),
+        timestamp_display: CSA_ReadCell_(row, idx.timestamp_display, r, 'timestamp_display'),
+        timestamp_iso: CSA_ReadCell_(row, idx.timestamp_iso, r, 'timestamp_iso'),
+        timestamp_sort: CSA_ReadCell_(row, idx.timestamp_sort, r, 'timestamp_sort')
+      };
+
+      // Fail-open: skip only rows that cannot render on map
+      if (!rec.id_a) return;
+      if (!Number.isFinite(rec.latitude) || !Number.isFinite(rec.longitude)) return;
+
+      incidents.push(rec);
+    });
+
+    const withDev034 = CSA_ApplyDev034TimestampFields_(incidents);
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: withDev034.length,
+      incidents: withDev034,
+      source: 'SHEET',
+      error: false
+    };
+
+  } catch (err) {
+    // Minimal but useful diagnostics (no sheet writes, no persistence)
+    return {
+      campus: (cfg && cfg.CSA_CAMPUS_NAME) ? cfg.CSA_CAMPUS_NAME : '',
+      count: 0,
+      incidents: [],
+      error: true,
+      error_message: String(err && err.message ? err.message : err)
+    };
+  }
+}
+
+/**
+ * Build normalized header map: lowercased trimmed header -> index
+ */
+function CSA_BuildHeaderMap_(headers) {
+  const map = {};
+  (headers || []).forEach((h, i) => {
+    const key = String(h || '').trim().toLowerCase();
+    if (key) map[key] = i;
+  });
+  return map;
+}
+
+/**
+ * Return index for the first matching candidate header name, else -1
+ */
+function CSA_IndexOfAny_(headerMap, candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const k = String(candidates[i]).trim().toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(headerMap, k)) return headerMap[k];
+  }
+  return -1;
+}
+
+/**
+ * Safe cell read (never throws)
+ */
+function CSA_ReadCell_(row, idx, rowNum, fieldName) {
+  if (!row || !Array.isArray(row)) return null;
+  if (typeof idx !== 'number' || idx < 0 || idx >= row.length) return null;
+  return row[idx];
+}
+
+function CSA_ToNumber_(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Normalize mock incidents to expected field names where possible.
+ * (This does NOT parse timestamps.)
+ */
+function CSA_NormalizeIncidents_(incidents) {
+  if (!Array.isArray(incidents)) return [];
+
+  return incidents.map((rec) => {
+    if (!rec || typeof rec !== 'object') return rec;
+
+    // Normalize lat/lon naming if present
+    if (rec.latitude == null && rec.lat != null) rec.latitude = rec.lat;
+    if (rec.longitude == null) {
+      if (rec.lon != null) rec.longitude = rec.lon;
+      else if (rec.lng != null) rec.longitude = rec.lng;
+      else if (rec.long != null) rec.longitude = rec.long;
+    }
+
+    // Normalize id
+    if (rec.id_a == null && rec.id != null) rec.id_a = rec.id;
+
+    return rec;
+  });
+}
+
+/**
+ * DEV034 Phase 1: add timestamp_epoch_ms + timestamp_tz
+ * Truth source: timestamp_sort (epoch ms)
+ */
+function _ARCHIVE_CSA_ApplyDev034TimestampFields_v1_3_1_(incidents) {
+  if (!Array.isArray(incidents)) return [];
+
+  return incidents.map((rec) => {
+    if (!rec || typeof rec !== 'object') return rec;
+
+    const sortEpoch = Number(rec.timestamp_sort);
+    if (Number.isFinite(sortEpoch)) {
+      rec.timestamp_epoch_ms = sortEpoch;
+      rec.timestamp_tz = 'America/Phoenix';
+      return rec;
+    }
+
+    // Preserve if already present (do not derive from iso/display)
+    const epoch = Number(rec.timestamp_epoch_ms);
+    if (Number.isFinite(epoch)) {
+      rec.timestamp_epoch_ms = epoch;
+      rec.timestamp_tz = 'America/Phoenix';
+    }
+
+    return rec;
+  });
+}
