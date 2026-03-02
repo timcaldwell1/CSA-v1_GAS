@@ -1,0 +1,228 @@
+change color scheme of markers and cards to the CSA color scheme.
+<!--
+  @file_name: CSA_AppShell.html
+  @title: CSA WebApp AppShell (DEV036 — UI Timestamp Consumption)
+  @version: v1.3.1
+  @Org_date_time: 2026-01-29
+  @Last Updated: 2026-01-29 09:55 MST
+  @authors:
+    Tim Caldwell,
+    ChatGPT, DEV036
+
+  @description:
+    UI-only update to consume canonical server timestamp fields:
+      - Sort by timestamp_epoch_ms (authoritative)
+      - Render timestamps via Intl.DateTimeFormat
+      - Session-only Local | MST toggle
+      - Timezone badge on cards and marker popups
+
+  @notes:
+    - No server, router, or sheet changes
+    - No persistence
+    - Sort invariant across timezone toggle
+-->
+
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>CSA — Safety Dashboard</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <style>
+    :root {
+      --bg:#0f172a; --panel:#0b1220; --panel2:#111b2f;
+      --text:#e5e7eb; --muted:#cbd5e1; --border:rgba(255,255,255,.1);
+      --accent:#5eead4;
+    }
+
+    body { margin:0; font-family:system-ui; background:var(--bg); color:var(--text); }
+    .app { display:grid; grid-template-columns:1.3fr .7fr; height:100vh; }
+    #map { height:100vh; }
+    .sidebar { background:var(--panel); border-left:1px solid var(--border); display:grid; grid-template-rows:auto 1fr auto; }
+    .header { padding:14px; border-bottom:1px solid var(--border); }
+    .title { margin:0; font-size:16px; font-weight:700; }
+    .subtitle { margin-top:6px; font-size:12px; color:var(--muted); }
+
+    .tz-toggle {
+      margin-top:10px;
+      font-size:12px;
+    }
+
+    .tz-toggle button {
+      background:none;
+      border:1px solid var(--border);
+      color:var(--text);
+      padding:4px 8px;
+      margin-right:6px;
+      cursor:pointer;
+    }
+
+    .tz-toggle button.active {
+      border-color:var(--accent);
+      color:var(--accent);
+    }
+
+    .cards { padding:12px; overflow:auto; }
+    .card { border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px; cursor:pointer; }
+    .card.selected { outline:2px solid rgba(94,234,212,.5); }
+    .meta { font-size:12px; color:var(--muted); }
+
+    .badge {
+      display:inline-block;
+      margin-left:6px;
+      font-size:10px;
+      padding:2px 6px;
+      border:1px solid var(--border);
+      border-radius:8px;
+    }
+
+    .footer { padding:10px 14px; border-top:1px solid var(--border); font-size:11px; color:var(--muted); }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <div id="map"></div>
+
+  <div class="sidebar">
+    <div class="header">
+      <h1 class="title">CSA — Safety Dashboard</h1>
+      <p class="subtitle">Read-only situational awareness</p>
+
+      <div class="tz-toggle">
+        <button id="btnLocal" class="active">Local</button>
+        <button id="btnMST">MST</button>
+      </div>
+    </div>
+
+    <div class="cards" id="cards"></div>
+    <div class="footer" id="footer">Status: Ready</div>
+  </div>
+</div>
+
+<script>
+  const DEFAULT_CENTER = [33.4484, -112.0740];
+  const DEFAULT_ZOOM = 11;
+
+  let map, clusterGroup;
+  let tzMode = "local"; // session-only
+
+  const cardsEl = document.getElementById("cards");
+  const footerEl = document.getElementById("footer");
+
+  document.getElementById("btnLocal").onclick = () => setTZ("local");
+  document.getElementById("btnMST").onclick   = () => setTZ("mst");
+
+  function setTZ(mode) {
+    tzMode = mode;
+    document.getElementById("btnLocal").classList.toggle("active", mode === "local");
+    document.getElementById("btnMST").classList.toggle("active", mode === "mst");
+    renderAllTimestamps();
+  }
+
+  function initMap() {
+    map = L.map("map").setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    clusterGroup = L.markerClusterGroup();
+    map.addLayer(clusterGroup);
+  }
+
+  function formatEpoch(epochMs) {
+    if (!Number.isFinite(epochMs)) return "";
+    return new Intl.DateTimeFormat("en-US", {
+      year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit",
+      timeZone: tzMode === "mst" ? "America/Phoenix" : undefined
+    }).format(new Date(epochMs));
+  }
+
+  function clearUI() {
+    cardsEl.innerHTML = "";
+    clusterGroup.clearLayers();
+  }
+
+  function renderAllTimestamps() {
+    document.querySelectorAll("[data-epoch]").forEach(el => {
+      const epoch = Number(el.dataset.epoch);
+      el.textContent = formatEpoch(epoch);
+    });
+  }
+
+  function loadIncidents() {
+    footerEl.textContent = "Status: Loading…";
+    google.script.run
+      .withSuccessHandler(onLoaded)
+      .withFailureHandler(() => footerEl.textContent = "Status: Load failed")
+      .CSA_WebApp_GetIncidentData();
+  }
+
+  function onLoaded(payload) {
+    clearUI();
+
+    const records = payload?.incidents || [];
+    if (!records.length) {
+      footerEl.textContent = "Status: No incidents";
+      return;
+    }
+
+    // 🔒 SORT — epoch only
+    records.sort((a, b) => b.timestamp_epoch_ms - a.timestamp_epoch_ms);
+
+    records.forEach((rec, idx) => {
+      const id = rec.id_a ?? idx;
+
+      // CARD
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+
+      const ts = document.createElement("span");
+      ts.dataset.epoch = rec.timestamp_epoch_ms;
+      ts.textContent = formatEpoch(rec.timestamp_epoch_ms);
+
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = tzMode === "mst" ? "MST" : "Local";
+
+      meta.append(ts, badge);
+      card.append(meta);
+      cardsEl.append(card);
+
+      // MARKER
+      if (Number.isFinite(rec.latitude) && Number.isFinite(rec.longitude)) {
+        const popup = `
+          <strong>${rec.incident_type}</strong><br/>
+          <span data-epoch="${rec.timestamp_epoch_ms}">
+            ${formatEpoch(rec.timestamp_epoch_ms)}
+          </span>
+          <span class="badge">${tzMode === "mst" ? "MST" : "Local"}</span>
+        `;
+        const m = L.marker([rec.latitude, rec.longitude]).bindPopup(popup);
+        clusterGroup.addLayer(m);
+      }
+    });
+
+    footerEl.textContent = `Status: Loaded (${records.length})`;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    initMap();
+    loadIncidents();
+  });
+</script>
+</body>
+</html>
