@@ -1,0 +1,141 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_dev054_dev053_shim_TEMP.gs
+ * @title: TEMP Shim — Restore Missing DEV053 ToolRunner Targets (test6)
+ * @product: CSA_v1.0 — Church Safety Alerts
+ * @artifact_namespace: CSA_v1.1 (Documents & Code)
+ * @version: v0.1-DEV054
+ * @status: TEMP — QA SUPPORT ONLY — NOT STABLE
+ * @create_date: 2026-02-26 MST
+ * @last_updated: 2026-02-26 MST
+ * @thread_lineage: DEV053 → DEV054
+ * @authors: Tim Caldwell → DEV054
+ *
+ * TEMP NOTICE:
+ * - This file exists only because DEV053 ToolRunner references functions that are missing.
+ * - It may be deleted during future hygiene once DEV053 implementation is properly restored.
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * Required by ToolRunner: RUN_DEV053_Status__test6() -> CSA_DEV053_Status__test6()
+ * Read-only, safe status summary for the 'test6' lane.
+ */
+function CSA_DEV053_Status__test6() {
+  return CSA_DEV054__LaneStatus_('test6');
+}
+
+/**
+ * Required by ToolRunner: RUN_DEV053_Debug_SpreadsheetBinding__test6()
+ * Read-only, safe binding diagnostics for a lane prefix.
+ */
+function CSA_DEV053_Debug_SpreadsheetBinding_(lane) {
+  return CSA_DEV054__DebugSpreadsheetBinding_(lane);
+}
+
+/* ============================================================
+   DEV054 Internal Helpers (Read-only)
+============================================================ */
+
+function CSA_DEV054__LaneStatus_(lane) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+
+    var env = props.getProperty('CSA_ENV') || '';
+    var sheetPrefix = props.getProperty('CSA_SHEET_PREFIX') || '';
+    var ssId = props.getProperty('CSA_SPREADSHEET_ID') || '';
+
+    var ss = ssId ? SpreadsheetApp.openById(ssId) : null;
+    if (!ss) {
+      return { ok: false, error: true, error_message: 'Missing CSA_SPREADSHEET_ID or cannot open spreadsheet', lane: lane };
+    }
+
+    var expected = [
+      lane + '_cop_calls_raw',
+      lane + '_poc_ingest_queue',
+      lane + '_incident_data',
+      lane + '_discarded_events',
+      lane + '_keyword_defs',
+      lane + '_audit_log',
+      lane + '_error_log',
+      lane + '_safety_zones'
+    ];
+
+    var sheets = {};
+    for (var i = 0; i < expected.length; i++) {
+      var name = expected[i];
+      var sh = ss.getSheetByName(name);
+      var lastRow = sh ? sh.getLastRow() : 0;
+      var dataRows = sh ? Math.max(0, lastRow - 1) : 0; // exclude header
+      sheets[name] = {
+        exists: !!sh,
+        last_row: lastRow,
+        data_rows: dataRows
+      };
+    }
+
+    return {
+      ok: true,
+      lane: lane,
+      env: env,
+      csa_sheet_prefix: sheetPrefix,
+      spreadsheet_id: ssId,
+      now_iso: new Date().toISOString(),
+      sheets: sheets
+    };
+
+  } catch (e) {
+    return { ok: false, error: true, lane: lane, error_message: String(e) };
+  }
+}
+
+function CSA_DEV054__DebugSpreadsheetBinding_(lane) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+
+    var ssIdProp = props.getProperty('CSA_SPREADSHEET_ID') || '';
+    var activeId = '';
+    try {
+      var active = SpreadsheetApp.getActiveSpreadsheet();
+      activeId = active ? active.getId() : '';
+    } catch (inner) {
+      activeId = '';
+    }
+
+    var match = (ssIdProp && activeId) ? (ssIdProp === activeId) : null;
+
+    // List missing sheets (read-only)
+    var ss = ssIdProp ? SpreadsheetApp.openById(ssIdProp) : null;
+    if (!ss) {
+      return { ok: false, error: true, lane: lane, error_message: 'Cannot open spreadsheet from CSA_SPREADSHEET_ID', spreadsheet_id_prop: ssIdProp, active_spreadsheet_id: activeId };
+    }
+
+    var expected = [
+      lane + '_cop_calls_raw',
+      lane + '_poc_ingest_queue',
+      lane + '_incident_data',
+      lane + '_discarded_events',
+      lane + '_keyword_defs',
+      lane + '_audit_log',
+      lane + '_error_log',
+      lane + '_safety_zones'
+    ];
+
+    var missing = [];
+    for (var i = 0; i < expected.length; i++) {
+      if (!ss.getSheetByName(expected[i])) missing.push(expected[i]);
+    }
+
+    return {
+      ok: true,
+      lane: lane,
+      spreadsheet_id_prop: ssIdProp,
+      active_spreadsheet_id: activeId,
+      binding_match: match,
+      missing_sheets: missing
+    };
+
+  } catch (e) {
+    return { ok: false, error: true, lane: lane, error_message: String(e) };
+  }
+}
