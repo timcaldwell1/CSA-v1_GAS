@@ -1,0 +1,29 @@
+/**
+ * file_name: CSA_DEV053_Config_v1_0.gs
+ * title: DEV053 Configuration Layer (Prefix Separation + Meta Enforcement)
+ * product: CSA_v1.0 — Church Safety Alerts
+ * version: 1.0
+ * status: WORKING
+ * thread_lineage: DEV048 → DEV052 → DEV053
+ * last_updated: 2026-02-23
+ */
+
+function CSA_DEV053_GetWebAppPrefix_() {
+  const props = PropertiesService.getScriptProperties();
+  return props.getProperty('CSA_WEBAPP_PREFIX') || 'test3';
+}
+
+function CSA_DEV053_GetIngestPrefix_() {
+  const props = PropertiesService.getScriptProperties();
+  return props.getProperty('CSA_INGEST_PREFIX') || 'test6';
+}
+
+function CSA_DEV053_AssertDevEnv_() {
+  const env = PropertiesService.getScriptProperties().getProperty('CSA_ENV');
+  if (env === 'PROD') {
+    throw new Error('CSA_DEV053: PROD execution blocked.');
+  }
+  if (env !== 'DEV') {
+    throw new Error('CSA_DEV053: ENV must be DEV.');
+  }
+}
