@@ -1,0 +1,45 @@
+/**
+ * @file CSA_OBI_Validate_v1_0.gs
+ * @description Validation utilities for CSA One Button Installation (OBI)
+ * @version v1.0.1
+ * @author Tim Caldwell
+ * @env CSA
+ * @date 2025-12-24
+ */
+
+/**
+ * Validates that all required sheets exist in the target spreadsheet.
+ * @param {Spreadsheet} ss - An open Spreadsheet object
+ * @throws {Error} FATAL if spreadsheet handle is invalid or sheets are missing
+ */
+function validateRequiredSheets_(ss) {
+  if (!ss) {
+    throw new Error('FATAL: Spreadsheet handle not provided to validateRequiredSheets_');
+  }
+
+  if (typeof ss.getSheets !== 'function') {
+    throw new Error('FATAL: Invalid Spreadsheet object passed to validateRequiredSheets_');
+  }
+
+  const requiredSheets = [
+    'test3_incident_data',
+    'test3_keywords',
+    'test3_safety_zones',
+    'test3_error_log',
+    'test3_audit_log'
+  ];
+
+  const existingSheetNames = ss.getSheets().map(s => s.getName());
+
+  const missingSheets = requiredSheets.filter(
+    name => existingSheetNames.indexOf(name) === -1
+  );
+
+  if (missingSheets.length > 0) {
+    throw new Error(
+      'FATAL: Missing required sheets: ' + missingSheets.join(', ')
+    );
+  }
+
+  return true;
+}
