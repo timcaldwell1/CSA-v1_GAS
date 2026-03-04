@@ -1,0 +1,44 @@
+/**
+ * csa_incidentFlow_debug
+ * Dev-only diagnostic for incident ingest + filter pipeline
+ */
+function csa_incidentFlow_debug() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('CSA_SPREADSHEET_ID');
+  const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'incident';
+  const name = (prefix === 'incident') ? 'incident_data' : prefix + '_incident_data';
+
+  const ss = SpreadsheetApp.openById(id);
+  const sheet = ss.getSheetByName(name);
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+  const idx = {};
+  headers.forEach((h, i) => { idx[h.trim()] = i; });
+
+  let accepted = 0;
+  let dropped = 0;
+
+  values.forEach((row, r) => {
+    const incident = {
+      id_a: row[idx["id"]],
+      lat: row[idx["latitude"]],
+      lng: row[idx["longitude"]],
+      timestamp: row[idx["timestamp"]],
+      keyword: row[idx["keyword"]],
+      risk_level: row[idx["risk_level"]],
+      campus: props.getProperty('CSA_CAMPUS_NAME')
+    };
+
+    if (!incident.lat || !incident.lng) {
+      Logger.log(`❌ Row ${r + 2} dropped — missing lat/lng: ${incident.id_a}`);
+      dropped++;
+      return;
+    }
+
+    Logger.log(`✅ Row ${r + 2} accepted: ${incident.id_a}`);
+    accepted++;
+  });
+
+  Logger.log(`Total accepted: ${accepted}`);
+  Logger.log(`Total dropped: ${dropped}`);
+}
