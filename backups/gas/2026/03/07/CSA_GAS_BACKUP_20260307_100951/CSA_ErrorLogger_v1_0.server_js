@@ -1,0 +1,257 @@
+/**
+ * ============================================================================
+ * File Name: CSA_ErrorLogger_v1_0.gs
+ * Title: CSA_ErrorLogger_v1_0 — Canonical Error Logger (19-column aware)
+ * Product: CSA_v1.0 — Church Safety Alerts
+ * Artifact Namespace: CSA_v1.1 (Documents & Code)
+ * Version: v1.2-DEV056
+ * Status: WORKING — DEV056 Observability Completion (error_log alignment)
+ * Thread Lineage: DEV032 → DEV040 → DEV048 → DEV050 → DEV055 → DEV056
+ * Last Updated (MST): 2026-03-01 5PM MST
+ * Authors: Tim Caldwell → DEV056 (G)
+ *
+ * Purpose:
+ * - Canonical writer for <prefix>_error_log using the CURRENT 19-column schema.
+ * - Append-only. Never throws. Never blocks calling logic.
+ * - Creates sheet if missing (with canonical 19-column header).
+ * - Validates header; if mismatch, logs to console and still attempts safe append.
+ *
+ * Canonical 19-column schema (A..S):
+ *  1) id
+ *  2) timestamp
+ *  3) error
+ *  4) incident_id
+ *  5) details
+ *  6) error_details
+ *  7) campus_attempted
+ *  8) original_ts
+ *  9) severity
+ * 10) env
+ * 11) source
+ * 12) function_name
+ * 13) message
+ * 14) event_id
+ * 15) event_ts_iso
+ * 16) domain
+ * 17) stage
+ * 18) outcome
+ * 19) request_id
+ * ============================================================================
+ */
+
+/** @const */
+var CSA_ERRORLOG_HEADERS_V19 = [
+  'id',
+  'timestamp',
+  'error',
+  'incident_id',
+  'details',
+  'error_details',
+  'campus_attempted',
+  'original_ts',
+  'severity',
+  'env',
+  'source',
+  'function_name',
+  'message',
+  'event_id',
+  'event_ts_iso',
+  'domain',
+  'stage',
+  'outcome',
+  'request_id'
+];
+
+/**
+ * Canonical error logger.
+ *
+ * Backward-compatible signature:
+ *   CSA_LogError_(err, context)
+ *
+ * Extended (optional) third arg:
+ *   CSA_LogError_(err, context, ctx)
+ *
+ * @param {Error|string|Object} err - error object or message
+ * @param {string=} context - calling function name (recommended)
+ * @param {Object=} ctx - optional structured context
+ * @return {Object} {ok:boolean, sheet?:string, prefix?:string, error?:string}
+ */
+function CSA_LogError_(err, context, ctx) {
+  ctx = ctx || {};
+
+  try {
+    var props = PropertiesService.getScriptProperties().getProperties();
+    var env = String(props.CSA_ENV || 'DEV').trim();
+
+    // Prefix: allow 'test5' or 'test5_' stored; normalize to no trailing underscore.
+    var prefix = String(props.CSA_SHEET_PREFIX || 'test5').trim();
+    if (prefix && prefix.slice(-1) === '_') prefix = prefix.slice(0, -1);
+
+    var spreadsheetId = String(props.CSA_SPREADSHEET_ID || '').trim();
+    if (!spreadsheetId) {
+      // No spreadsheet configured; fail-open.
+      CSA__consoleError_('CSA_LogError_: CSA_SPREADSHEET_ID not set. Skipping write.');
+      return { ok: false, error: 'CSA_SPREADSHEET_ID not set' };
+    }
+
+    var sheetName = prefix + '_error_log';
+    var ss = SpreadsheetApp.openById(spreadsheetId);
+    var sh = ss.getSheetByName(sheetName);
+
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+      sh.getRange(1, 1, 1, CSA_ERRORLOG_HEADERS_V19.length).setValues([CSA_ERRORLOG_HEADERS_V19]);
+    } else {
+      // Header validation (best-effort). Do not throw.
+      CSA__validateErrorLogHeader_(sh, sheetName);
+    }
+
+    var eObj = CSA__normalizeErr_(err);
+    var timestamp = new Date();
+
+    // Core fields
+    var row = [
+      Utilities.getUuid(),                           // id
+      timestamp,                                     // timestamp
+      eObj.name,                                     // error
+      CSA__safeStr_(ctx.incident_id),                // incident_id
+      CSA__stringifyDetails_(ctx.details),           // details
+      eObj.stack,                                    // error_details
+      CSA__safeStr_(ctx.campus_attempted),           // campus_attempted
+      CSA__safeStr_(ctx.original_ts),                // original_ts
+      CSA__safeStr_(ctx.severity || 'ERROR'),        // severity
+      env,                                           // env
+      CSA__safeStr_(ctx.source || 'CSA_LogError_'),  // source
+      CSA__safeStr_(context || ctx.function_name || 'UNKNOWN'), // function_name
+      eObj.message,                                  // message
+
+      // DEV032-style correlation fields (optional)
+      CSA__safeStr_(ctx.event_id),                   // event_id
+      CSA__safeStr_(ctx.event_ts_iso),               // event_ts_iso
+      CSA__safeStr_(ctx.domain),                     // domain
+      CSA__safeStr_(ctx.stage),                      // stage
+      CSA__safeStr_(ctx.outcome),                    // outcome
+      CSA__safeStr_(ctx.request_id)                  // request_id
+    ];
+
+    // Ensure row length exactly 19
+    if (row.length !== CSA_ERRORLOG_HEADERS_V19.length) {
+      // Should never happen, but guard anyway.
+      CSA__consoleError_('CSA_LogError_: row length mismatch=' + row.length);
+      row = row.slice(0, CSA_ERRORLOG_HEADERS_V19.length);
+      while (row.length < CSA_ERRORLOG_HEADERS_V19.length) row.push('');
+    }
+
+    sh.appendRow(row);
+
+    return { ok: true, sheet: sheetName, prefix: prefix };
+
+  } catch (loggingFailure) {
+    // Fail-open: never throw from logger
+    CSA__consoleError_('CSA_LogError_ failure: ' + CSA__safeStr_(loggingFailure && loggingFailure.message ? loggingFailure.message : loggingFailure));
+    return { ok: false, error: CSA__safeStr_(loggingFailure && loggingFailure.message ? loggingFailure.message : loggingFailure) };
+  }
+}
+
+/**
+ * DEV048 safe hook adapter (previously missing in some snapshots).
+ * DEV048 calls: globalThis['CSA_ERROR_LogException_'](err, ctx)
+ *
+ * @param {Error|string|Object} err
+ * @param {Object=} ctx - may include function_name, source, severity, domain, stage, outcome, request_id, etc.
+ */
+function CSA_ERROR_LogException_(err, ctx) {
+  ctx = ctx || {};
+  var fn = String(ctx.function_name || 'CSA_ERROR_LogException_');
+  // Pass ctx through as the third argument.
+  CSA_LogError_(err, fn, ctx);
+}
+
+/* ============================================================================
+   Internal helpers (no external dependencies)
+============================================================================ */
+
+function CSA__normalizeErr_(err) {
+  try {
+    if (err instanceof Error) {
+      return {
+        name: CSA__safeStr_(err.name || 'Error'),
+        message: CSA__safeStr_(err.message || String(err)),
+        stack: CSA__safeStr_(err.stack || '')
+      };
+    }
+
+    // If err is an object, attempt to serialize
+    if (typeof err === 'object' && err !== null) {
+      var msg = '';
+      try { msg = JSON.stringify(err); } catch (e) { msg = String(err); }
+      return {
+        name: 'Error',
+        message: CSA__safeStr_(msg),
+        stack: ''
+      };
+    }
+
+    // String or other primitive
+    return {
+      name: 'Error',
+      message: CSA__safeStr_(String(err)),
+      stack: ''
+    };
+  } catch (e2) {
+    return { name: 'Error', message: 'Unprintable error', stack: '' };
+  }
+}
+
+function CSA__safeStr_(v) {
+  if (v === null || v === undefined) return '';
+  return String(v);
+}
+
+function CSA__stringifyDetails_(details) {
+  if (details === null || details === undefined) return '';
+  if (typeof details === 'string') return details;
+
+  // If object/array, JSON-encode
+  try {
+    return JSON.stringify(details);
+  } catch (e) {
+    return String(details);
+  }
+}
+
+function CSA__validateErrorLogHeader_(sh, sheetName) {
+  try {
+    var lastCol = sh.getLastColumn();
+    if (lastCol < CSA_ERRORLOG_HEADERS_V19.length) {
+      CSA__consoleError_('[ERROR_LOG][HEADER] ' + sheetName + ' has too few columns=' + lastCol + ' expected=' + CSA_ERRORLOG_HEADERS_V19.length);
+      return;
+    }
+
+    var hdr = sh.getRange(1, 1, 1, CSA_ERRORLOG_HEADERS_V19.length).getValues()[0] || [];
+    var norm = hdr.map(function (v) { return String(v || '').trim(); });
+    var expected = CSA_ERRORLOG_HEADERS_V19;
+
+    for (var i = 0; i < expected.length; i++) {
+      if (norm[i] !== expected[i]) {
+        CSA__consoleError_('[ERROR_LOG][HEADER_MISMATCH] ' + sheetName + ' col=' + (i + 1) + ' got="' + norm[i] + '" expected="' + expected[i] + '"');
+        return;
+      }
+    }
+  } catch (e) {
+    // best-effort only
+    CSA__consoleError_('[ERROR_LOG][HEADER_VALIDATE_EXCEPTION] ' + sheetName + ' ' + CSA__safeStr_(e && e.message ? e.message : e));
+  }
+}
+
+function CSA__consoleError_(msg) {
+  try {
+    if (typeof console !== 'undefined' && console && typeof console.error === 'function') {
+      console.error(msg);
+      return;
+    }
+  } catch (ignored) {}
+  try {
+    Logger.log(msg);
+  } catch (ignored2) {}
+}
