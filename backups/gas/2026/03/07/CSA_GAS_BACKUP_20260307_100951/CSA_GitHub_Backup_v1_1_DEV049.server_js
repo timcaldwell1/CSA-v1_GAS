@@ -1,0 +1,259 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_GitHub_Backup_v1_1_DEV049.gs
+ * @title: CSA — GitHub Backup + Permission Diagnostics (Fine-Grained PAT Safe)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.1.0-DEV049
+ * @binder_type: Operations / Safeguards
+ * @current_phase: DEV049 Integration Support (No runtime behavior change)
+ * @thread_lineage: DEV021 → DEV024 → DEV049
+ * @create_date: 2026-02-16 15:05 MST
+ * @last_updated: 2026-02-16 15:05 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT DEV049
+ *
+ * PURPOSE
+ * -------
+ * Push the most recent Drive snapshot folder (CSA_GAS_BACKUP_*) to GitHub repo contents.
+ * Adds deterministic diagnostics for 403 permission failures, including:
+ *  - Full response body
+ *  - X-Accepted-GitHub-Permissions (GitHub guidance)
+ *
+ * REQUIRED SCRIPT PROPERTIES
+ * -------------------------
+ * GITHUB_PAT               (fine-grained PAT recommended)
+ * GITHUB_REPO              e.g., "timcaldwell1/CSA-v1_GAS"
+ * GITHUB_BRANCH            e.g., "main"
+ * GITHUB_BASE_PATH         e.g., "backups/gas"  (repo folder root)
+ * CSA_GAS_BACKUP_FOLDER_ID Drive folder holding CSA_GAS_BACKUP_* snapshots
+ *
+ * NOTE
+ * ----
+ * This tool does NOT alter runtime CSA ingest logic.
+ * It is operator-invoked only.
+ * --------------------------------------------------------------------
+ */
+
+function CSA_GitHub_Auth_Test_DEV049_() {
+  var props = PropertiesService.getScriptProperties();
+  var token = (props.getProperty('GITHUB_PAT') || '').trim();
+  if (!token) throw new Error('Missing Script Property: GITHUB_PAT');
+
+  var res = UrlFetchApp.fetch('https://api.github.com/user', {
+    method: 'get',
+    headers: CSA_GitHub__headers_(token, 'CSA-Auth-Test-DEV049'),
+    muteHttpExceptions: true
+  });
+
+  Logger.log('[GITHUB][AUTH] http=%s', res.getResponseCode());
+  Logger.log('[GITHUB][AUTH] body=%s', res.getContentText());
+  return { ok: res.getResponseCode() >= 200 && res.getResponseCode() < 300, http: res.getResponseCode() };
+}
+
+/**
+ * Diagnostic: confirms repo access and prints the permission header guidance.
+ * This does NOT write anything.
+ */
+function CSA_GitHub_DiagnosePermissions_DEV049_() {
+  var props = PropertiesService.getScriptProperties();
+
+  var token = (props.getProperty('GITHUB_PAT') || '').trim();
+  var repo = (props.getProperty('GITHUB_REPO') || '').trim();
+
+  if (!token) throw new Error('Missing Script Property: GITHUB_PAT');
+  if (!repo) throw new Error('Missing Script Property: GITHUB_REPO');
+
+  var url = 'https://api.github.com/repos/' + repo;
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: CSA_GitHub__headers_(token, 'CSA-Repo-Diag-DEV049'),
+    muteHttpExceptions: true
+  });
+
+  var http = res.getResponseCode();
+  var body = res.getContentText() || '';
+  var headers = res.getAllHeaders() || {};
+
+  Logger.log('[GITHUB][DIAG] GET %s', url);
+  Logger.log('[GITHUB][DIAG] http=%s', http);
+  Logger.log('[GITHUB][DIAG] x-accepted-github-permissions=%s', String(headers['X-Accepted-GitHub-Permissions'] || ''));
+  Logger.log('[GITHUB][DIAG] x-github-request-id=%s', String(headers['X-GitHub-Request-Id'] || ''));
+  Logger.log('[GITHUB][DIAG] body=%s', body);
+
+  return {
+    ok: http >= 200 && http < 300,
+    http: http,
+    accepted_permissions: String(headers['X-Accepted-GitHub-Permissions'] || ''),
+    request_id: String(headers['X-GitHub-Request-Id'] || '')
+  };
+}
+
+/**
+ * Main: push latest Drive snapshot folder contents to GitHub.
+ * - Adds sha lookup (update existing files safely)
+ * - Adds full-body error reporting and accepted-permissions header on 403
+ */
+function CSA_GitHub_Push_Latest_GAS_Snapshot_To_GitHub_DEV049_() {
+  var props = PropertiesService.getScriptProperties();
+
+  var token = (props.getProperty('GITHUB_PAT') || '').trim();
+  var repo = (props.getProperty('GITHUB_REPO') || '').trim();
+  var branch = (props.getProperty('GITHUB_BRANCH') || '').trim();
+  var basePath = (props.getProperty('GITHUB_BASE_PATH') || '').trim();
+  var backupFolderId = (props.getProperty('CSA_GAS_BACKUP_FOLDER_ID') || '').trim();
+
+  CSA_GitHub__require_(token, 'GITHUB_PAT');
+  CSA_GitHub__require_(repo, 'GITHUB_REPO');
+  CSA_GitHub__require_(branch, 'GITHUB_BRANCH');
+  CSA_GitHub__require_(basePath, 'GITHUB_BASE_PATH');
+  CSA_GitHub__require_(backupFolderId, 'CSA_GAS_BACKUP_FOLDER_ID');
+
+  // 1) Locate most recent snapshot folder
+  var latest = CSA_GitHub__findLatestBackupFolder_(backupFolderId);
+  var latestFolder = latest.folder;
+  var latestName = latest.name;
+
+  var ts = latestName.replace('CSA_GAS_BACKUP_', '');
+  var year = ts.substring(0, 4);
+  var month = ts.substring(4, 6);
+  var day = ts.substring(6, 8);
+
+  var repoBasePath = basePath + '/' + year + '/' + month + '/' + day + '/' + latestName;
+
+  // 2) Collect files
+  var filesIt = latestFolder.getFiles();
+  var files = [];
+  while (filesIt.hasNext()) files.push(filesIt.next());
+  if (!files.length) throw new Error('Snapshot folder is empty: ' + latestName);
+
+  Logger.log('[GITHUB][PUSH] repo=%s branch=%s basePath=%s files=%s', repo, branch, repoBasePath, files.length);
+
+  // 3) Push each file (create/update)
+  var pushed = 0;
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var path = repoBasePath + '/' + f.getName();
+
+    var putResult = CSA_GitHub__putContent_(token, repo, branch, path, f.getBlob().getBytes());
+    pushed++;
+
+    Logger.log('[GITHUB][PUSH] OK %s (%s)', path, putResult.mode);
+  }
+
+  Logger.log('[GITHUB][PUSH] DONE pushed=%s folder=%s', pushed, latestName);
+  return { ok: true, pushed: pushed, folder: latestName, repo_path: repoBasePath };
+}
+
+/* ===========================
+   Internal helpers (DEV049)
+=========================== */
+
+function CSA_GitHub__headers_(token, userAgent) {
+  return {
+    Authorization: 'Bearer ' + token,
+    Accept: 'application/vnd.github+json',
+    'User-Agent': userAgent || 'CSA-GAS',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+}
+
+function CSA_GitHub__require_(value, key) {
+  if (!value) throw new Error('Missing or empty Script Property: ' + key);
+}
+
+function CSA_GitHub__findLatestBackupFolder_(backupFolderId) {
+  var parent = DriveApp.getFolderById(backupFolderId);
+  var folders = parent.getFolders();
+
+  var latestFolder = null;
+  var latestName = '';
+
+  while (folders.hasNext()) {
+    var f = folders.next();
+    var n = f.getName();
+    if (n.indexOf('CSA_GAS_BACKUP_') === 0 && n > latestName) {
+      latestName = n;
+      latestFolder = f;
+    }
+  }
+
+  if (!latestFolder) throw new Error('No CSA_GAS_BACKUP_* folder found in folderId=' + backupFolderId);
+  return { folder: latestFolder, name: latestName };
+}
+
+/**
+ * Returns sha if file exists, else null.
+ */
+function CSA_GitHub__getShaIfExists_(token, repo, branch, path) {
+  var url = 'https://api.github.com/repos/' + repo + '/contents/' + encodeURIComponent(path) + '?ref=' + encodeURIComponent(branch);
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: CSA_GitHub__headers_(token, 'CSA-GetSHA-DEV049'),
+    muteHttpExceptions: true
+  });
+
+  var http = res.getResponseCode();
+  if (http === 200) {
+    try {
+      var obj = JSON.parse(res.getContentText() || '{}');
+      return obj && obj.sha ? String(obj.sha) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 404 means "doesn't exist" (fine)
+  return null;
+}
+
+function CSA_GitHub__putContent_(token, repo, branch, path, bytes) {
+  var url = 'https://api.github.com/repos/' + repo + '/contents/' + encodeURIComponent(path);
+
+  // Update requires SHA; create does not.
+  var sha = CSA_GitHub__getShaIfExists_(token, repo, branch, path);
+
+  var payload = {
+    message: 'GAS snapshot — ' + CSA_GitHub__formatNowMST_(),
+    content: Utilities.base64Encode(bytes),
+    branch: branch,
+    committer: { name: 'Tim Caldwell', email: 'CCSAsafetyteam@gmail.com' }
+  };
+  if (sha) payload.sha = sha;
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'put',
+    contentType: 'application/json',
+    headers: CSA_GitHub__headers_(token, 'CSA-Push-DEV049'),
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var http = res.getResponseCode();
+  if (http >= 200 && http < 300) {
+    return { ok: true, mode: sha ? 'UPDATE' : 'CREATE' };
+  }
+
+  // Diagnostics (especially for 403)
+  var body = res.getContentText() || '';
+  var headers = res.getAllHeaders() || {};
+
+  Logger.log('[GITHUB][ERROR] PUT %s', url);
+  Logger.log('[GITHUB][ERROR] http=%s', http);
+  Logger.log('[GITHUB][ERROR] x-accepted-github-permissions=%s', String(headers['X-Accepted-GitHub-Permissions'] || ''));
+  Logger.log('[GITHUB][ERROR] x-github-request-id=%s', String(headers['X-GitHub-Request-Id'] || ''));
+  Logger.log('[GITHUB][ERROR] body=%s', body);
+
+  throw new Error(
+    'GitHub write failed http=' + http +
+    ' accepted_permissions=' + String(headers['X-Accepted-GitHub-Permissions'] || '') +
+    ' request_id=' + String(headers['X-GitHub-Request-Id'] || '') +
+    ' body=' + body
+  );
+}
+
+function CSA_GitHub__formatNowMST_() {
+  return Utilities.formatDate(new Date(), 'America/Phoenix', "yyyy-MM-dd HH:mm 'MST'");
+}
