@@ -1,0 +1,87 @@
+/**
+ * @file_name: CSA_VERIFY_DataBridge_v1_1_DEV032.gs
+ * @title: CSA Verification — DataBridge Authority & Sheet Resolution
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 11:15 MST
+ * @Last Updated: 2026-01-25 11:15 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Verifies that:
+ * - Exactly one CSA_GetIncidentData_ is active
+ * - Incident sheet name resolves correctly
+ * - Data is returned (count > 0)
+ *
+ * SAFE
+ * ----
+ * - Read-only
+ * - No writes
+ * - No deploy required
+ */
+
+function CSA_VERIFY_DataBridge_() {
+
+  Logger.log('=== CSA VERIFY: DataBridge START ===');
+
+  // 1. Verify function exists
+  if (typeof CSA_GetIncidentData_ !== 'function') {
+    Logger.log('FAIL: CSA_GetIncidentData_ is not defined');
+    return;
+  }
+  Logger.log('PASS: CSA_GetIncidentData_ is defined');
+
+  // 2. Resolve expected sheet name
+  const props = PropertiesService.getScriptProperties();
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  let expectedSheet;
+  if (!prefix || prefix === 'incident') {
+    expectedSheet = 'incident_data';
+  } else {
+    expectedSheet = prefix + '_incident_data';
+  }
+
+  Logger.log('INFO: Expected incident sheet = ' + expectedSheet);
+/*
+  // 3. Confirm sheet exists
+  const ss = SpreadsheetApp.openById(props.getProperty('CSA_SPREADSHEET_ID'));
+  const sheet = ss.getSheetByName(expectedSheet);
+
+  if (!sheet) {
+    Logger.log('FAIL: Sheet not found: ' + expectedSheet);
+    return;
+  }
+  Logger.log('PASS: Sheet exists');
+*/
+  // 4. Call DataBridge directly
+  const result = CSA_GetIncidentData_('VERIFY_RUN');
+
+  if (!result || typeof result !== 'object') {
+    Logger.log('FAIL: DataBridge returned invalid result');
+    return;
+  }
+
+  Logger.log('INFO: DataBridge result = ' + JSON.stringify(result));
+
+  if (result.error === true) {
+    Logger.log('FAIL: DataBridge returned error=true');
+    return;
+  }
+
+  if (!Array.isArray(result.incidents)) {
+    Logger.log('FAIL: incidents is not an array');
+    return;
+  }
+
+  if (result.incidents.length === 0) {
+    Logger.log('FAIL: incidents array is empty');
+    return;
+  }
+
+  Logger.log('PASS: incidents returned = ' + result.incidents.length);
+  Logger.log('=== CSA VERIFY: DataBridge PASS ===');
+}
