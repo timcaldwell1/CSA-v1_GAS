@@ -1,0 +1,21 @@
+/**
+ * CSAv1 — Explicit Sheets Scope Authorization (Option B)
+ * Allows standalone GAS project to access spreadsheet via openById
+ * Author: DEV032 | POC Phase 1 Task
+ *
+ * USE: Run this once from the Script Editor to grant access
+ * This is required due to unbound project (Option B)
+ */
+function CSA_AUTHORIZE_SHEETS_SCOPE() {
+  const id = PropertiesService.getScriptProperties().getProperty('CSA_SPREADSHEET_ID');
+  if (!id) {
+    Logger.log('❌ CSA_SPREADSHEET_ID not found in script properties.');
+    return;
+  }
+  try {
+    const sheet = SpreadsheetApp.openById(id);
+    Logger.log('✅ Access granted: ' + sheet.getName());
+  } catch (e) {
+    Logger.log('❌ Authorization failed: ' + e.message);
+  }
+}
