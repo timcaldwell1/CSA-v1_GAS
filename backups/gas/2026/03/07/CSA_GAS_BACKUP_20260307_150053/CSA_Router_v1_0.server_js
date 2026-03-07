@@ -1,0 +1,112 @@
+/**
+ * @file_name: CSA_Router_v1_1_DEV032.gs
+ * @title: CSA Router — Request Correlation + QA Guards
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.1.0
+ * @Org_date_time: 2026-01-25 09:00 MST
+ * @Last Updated: 2026-01-25 09:00 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *
+ * PURPOSE
+ * -------
+ * Central WebApp router.
+ *
+ * v1.1 ADDITIONS
+ * --------------
+ * - request_id generated once per invocation
+ * - QA Mock C (router-only) hard block
+ * - Observability events emitted (fail-open)
+ *
+ * HARD RULES
+ * ----------
+ * - Router is the only hard-block boundary
+ * - PROD + MOCK remains blocked
+ * - HTML response preserved for guard failures
+ */
+
+function doGet(e) {
+  return CSA_Route_(e);
+}
+
+function CSA_Route_(e) {
+
+
+  // ---------- request correlation ----------
+  const requestId = Utilities.getUuid();
+  e = e || {};
+  e.csa_request_id = requestId;
+
+  Logger.log('CSA Router entry request_id=' + requestId);
+
+  const props = PropertiesService.getScriptProperties();
+  const env = String(props.getProperty('CSA_ENV') || 'UNKNOWN').toUpperCase();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE') || 'FALSE').toUpperCase();
+
+  // ---------- HARD GUARD: PROD + MOCK ----------
+  if (env === 'PROD' && mockMode === 'TRUE') {
+    CSA_LogEvent_({
+      severity: 'FATAL',
+      domain: 'ROUTER',
+      stage: 'DETECT',
+      outcome: 'BLOCKED',
+      error: 'RouterGuardFailure',
+      function_name: 'CSA_Route_',
+      message: 'Mock mode TRUE in PROD',
+      request_id: requestId
+    });
+
+    return HtmlService.createHtmlOutput(
+      '<h3>CSA Router Guard</h3><p>Mock mode is not permitted in PROD.</p>'
+    );
+  }
+
+  // ---------- QA MOCK C (router-only) ----------
+  if (CSA_IsQAMockC_(e, env, mockMode)) {
+    CSA_LogEvent_({
+      severity: 'FATAL',
+      domain: 'ROUTER',
+      stage: 'DETECT',
+      outcome: 'BLOCKED',
+      error: 'RouterGuardFailure',
+      function_name: 'CSA_Route_',
+      message: 'QA Mock C triggered',
+      request_id: requestId,
+      error_details: { qa_mock_c: true }
+    });
+
+    return HtmlService.createHtmlOutput(
+      '<h3>CSA Router Guard</h3><p>QA Mock C triggered.</p>'
+    );
+  }
+
+  // ---------- route resolution ----------
+  const mode =
+    e && e.parameter && e.parameter.mode ?
+      String(e.parameter.mode).toLowerCase() : null;
+
+  const route =
+    e && e.parameter && e.parameter.route ?
+      String(e.parameter.route).toLowerCase() : null;
+
+  // ---------- DATA MODE ----------
+  if (mode === 'data' || route === 'data') {
+    const payload = CSA_GetIncidentData_(requestId);
+    return ContentService
+      .createTextOutput(JSON.stringify(payload))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // ---------- APP MODE ----------
+  return HtmlService.createHtmlOutputFromFile('CSA_AppShell_v1_3_2_DEV036');
+}
+
+function CSA_IsQAMockC_(e, env, mockMode) {
+  if ((env !== 'DEV' && env !== 'QA') || mockMode !== 'TRUE') return false;
+  const p = e && e.parameter ? e.parameter : {};
+  if (String(p.qa_mock_c || '').toLowerCase() === 'true') return true;
+
+  const prop = PropertiesService.getScriptProperties().getProperty('CSA_QA_MOCK_C');
+  return String(prop || '').toUpperCase() === 'TRUE';
+}
