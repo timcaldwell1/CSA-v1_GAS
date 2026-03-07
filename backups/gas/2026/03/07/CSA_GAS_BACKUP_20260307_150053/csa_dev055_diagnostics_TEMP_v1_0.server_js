@@ -1,0 +1,110 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: csa_dev055_prefix_tools_TEMP_v1_0.gs
+ * @title: DEV055 TEMP — Prefix Triplet Setter (test5/test6)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @artifact_namespace: CSA_v1.1 (Documents & Code)
+ * @version: v1.0.0-DEV055
+ * @status: TEMP — FOR TODAY ONLY (may be deleted during GAS hygiene)
+ * @create_date: 2026-02-28 MST
+ * @last_updated: 2026-02-28 MST
+ * @thread_lineage: DEV055
+ * @authors: Tim Caldwell → DEV055-Author (G)
+ *
+ * DEV-only guard: refuses writes if CSA_ENV === 'PROD'
+ * --------------------------------------------------------------------
+ */
+
+function RUN_DEV055_SetPrefixTriplet_Test5() {
+  return CSA_DEV055_SetPrefixTriplet_('test5');
+}
+
+function RUN_DEV055_SetPrefixTriplet_Test6() {
+  return CSA_DEV055_SetPrefixTriplet_('test6');
+}
+
+function RUN_DEV055_DumpPrefixTriplet() {
+  var props = PropertiesService.getScriptProperties();
+  var env = String(props.getProperty('CSA_ENV') || '').trim().toUpperCase();
+
+  var out = {
+    ok: true,
+    env: env || 'UNKNOWN',
+    CSA_SHEET_PREFIX: String(props.getProperty('CSA_SHEET_PREFIX') || ''),
+    CSA_INGEST_PREFIX: String(props.getProperty('CSA_INGEST_PREFIX') || ''),
+    CSA_TEMPLATE_PREFIX: String(props.getProperty('CSA_TEMPLATE_PREFIX') || ''),
+    timestamp_mst: CSA_DEV055__fmtMst_(new Date())
+  };
+
+  Logger.log('[DEV055][PREFIX_DUMP] env=%s sheet=%s ingest=%s template=%s @ %s',
+    out.env,
+    out.CSA_SHEET_PREFIX,
+    out.CSA_INGEST_PREFIX,
+    out.CSA_TEMPLATE_PREFIX,
+    out.timestamp_mst
+  );
+
+  return out;
+}
+
+function CSA_DEV055_SetPrefixTriplet_(prefix) {
+
+  prefix = String(prefix || '').trim();
+  if (!prefix) throw new Error('DEV055: prefix required.');
+
+  var props = PropertiesService.getScriptProperties();
+  var env = String(props.getProperty('CSA_ENV') || '').trim().toUpperCase();
+
+  if (env === 'PROD') {
+    Logger.log('[DEV055][REFUSED] CSA_ENV=PROD. DEV-only operation.');
+    return {
+      ok: false,
+      reason: 'ENV_IS_PROD',
+      env: env,
+      requested_prefix: prefix,
+      timestamp_mst: CSA_DEV055__fmtMst_(new Date())
+    };
+  }
+
+  var before = {
+    CSA_SHEET_PREFIX: String(props.getProperty('CSA_SHEET_PREFIX') || ''),
+    CSA_INGEST_PREFIX: String(props.getProperty('CSA_INGEST_PREFIX') || ''),
+    CSA_TEMPLATE_PREFIX: String(props.getProperty('CSA_TEMPLATE_PREFIX') || '')
+  };
+
+  props.setProperty('CSA_SHEET_PREFIX', prefix);
+  props.setProperty('CSA_INGEST_PREFIX', prefix);
+  props.setProperty('CSA_TEMPLATE_PREFIX', prefix);
+
+  var after = {
+    CSA_SHEET_PREFIX: String(props.getProperty('CSA_SHEET_PREFIX') || ''),
+    CSA_INGEST_PREFIX: String(props.getProperty('CSA_INGEST_PREFIX') || ''),
+    CSA_TEMPLATE_PREFIX: String(props.getProperty('CSA_TEMPLATE_PREFIX') || '')
+  };
+
+  var out = {
+    ok: true,
+    env: env || 'UNKNOWN',
+    requested_prefix: prefix,
+    before: before,
+    after: after,
+    timestamp_mst: CSA_DEV055__fmtMst_(new Date())
+  };
+
+  Logger.log('[DEV055][PREFIX_SET] env=%s %s/%s/%s -> %s/%s/%s @ %s',
+    out.env,
+    before.CSA_SHEET_PREFIX,
+    before.CSA_INGEST_PREFIX,
+    before.CSA_TEMPLATE_PREFIX,
+    after.CSA_SHEET_PREFIX,
+    after.CSA_INGEST_PREFIX,
+    after.CSA_TEMPLATE_PREFIX,
+    out.timestamp_mst
+  );
+
+  return out;
+}
+
+function CSA_DEV055__fmtMst_(d) {
+  return Utilities.formatDate(d, 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST';
+}
