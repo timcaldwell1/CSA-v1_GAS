@@ -1,0 +1,171 @@
+
+/**
+ * @file_name: CSA_DataBridge_v1_3_1_DEV032.gs
+ * @title: CSA Data Bridge — Correct Incident Sheet Resolution (DEV034 Payload Extension Applied)
+ * @product: CSA — Church Safety Alerts
+ * @version: v1.3.2-DEV034
+ * @Org_date_time: 2026-01-25 10:45 MST
+ * @Last Updated: 2026-01-29 10:05 MST
+ * @authors:
+ *   Tim Caldwell
+ *   ChatGPT, DEV032
+ *   ChatGPT, DEV034 / DEV036
+ *
+ * PURPOSE
+ * -------
+ * Read-only incident retrieval with correct sheet naming.
+ * Fail-open by design.
+ *
+ * DEV034 PHASE 1 (APPLIED HERE)
+ * ----------------------------
+ * Extend incident payload (additive only) with:
+ *   - timestamp_epoch_ms  (derived from timestamp_sort)
+ *   - timestamp_tz        (constant "America/Phoenix")
+ *
+ * Non-negotiables honored:
+ *   - No router changes
+ *   - No sheet schema changes
+ *   - No existing payload field removals/renames
+ *   - Payload-only (no writes)
+ */
+
+function CSA_GetIncidentData_(requestId) {
+
+  const props = PropertiesService.getScriptProperties();
+  const env = String(props.getProperty('CSA_ENV') || 'UNKNOWN').toUpperCase();
+  const mockMode = String(props.getProperty('CSA_MOCK_MODE') || 'FALSE').toUpperCase();
+
+  const cfg = CSA_GetConfig_();
+
+  // ----------------------------
+  // Resolve incident sheet name
+  // ----------------------------
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  let INCIDENT_SHEET_NAME;
+
+  if (!prefix || prefix === 'incident') {
+    INCIDENT_SHEET_NAME = 'incident_data'; // canonical PROD sheet
+  } else {
+    INCIDENT_SHEET_NAME = prefix + '_incident_data';
+  }
+
+  // ----------------------------
+  // MOCK MODE
+  // ----------------------------
+  if (mockMode === 'TRUE') {
+    const incidentsRaw = CSA_DEV012_GenerateMockIncidents_(cfg);
+
+    // DEV034 additive fields (best-effort, no parsing required)
+    const incidents = CSA_ApplyDev034TimestampFields_(incidentsRaw);
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: incidents.length,
+      incidents: incidents,
+      source: 'MOCK'
+    };
+  }
+
+  // ----------------------------
+  // SHEET MODE
+  // ----------------------------
+  try {
+    const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+
+    if (!sheet) {
+      throw new Error('Incident sheet not found: ' + INCIDENT_SHEET_NAME);
+    }
+
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) {
+      return {
+        campus: cfg.CSA_CAMPUS_NAME,
+        count: 0,
+        incidents: [],
+        source: 'SHEET'
+      };
+    }
+
+    const headers = values.shift();
+    const idx = indexHeaders_(headers);
+
+    const incidents = [];
+
+    values.forEach(row => {
+      incidents.push({
+        id_a: row[0],
+        incident_type: row[idx.incident_type],
+        description: row[idx.description],
+        latitude: row[idx.lat],
+        longitude: row[idx.lng],
+        timestamp_display: row[idx.timestamp_display],
+        timestamp_iso: row[idx.timestamp_iso],
+        timestamp_sort: row[idx.timestamp_sort]
+      });
+    });
+
+    // DEV034 additive fields (authoritative derivation)
+    const incidentsWithDev034 = CSA_ApplyDev034TimestampFields_(incidents);
+
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: incidentsWithDev034.length,
+      incidents: incidentsWithDev034,
+      source: 'SHEET'
+    };
+
+  } catch (err) {
+    CSA_LogException_(err, 'CSA_GetIncidentData_');
+    return {
+      campus: cfg.CSA_CAMPUS_NAME,
+      count: 0,
+      incidents: [],
+      error: true
+    };
+  }
+}
+
+/**
+ * DEV034 Phase 1 helper:
+ * Adds timestamp_epoch_ms and timestamp_tz to each incident record.
+ *
+ * Rules:
+ * 1) Prefer timestamp_sort as the canonical epoch-ms source.
+ * 2) If timestamp_sort is missing but timestamp_epoch_ms exists, preserve it.
+ * 3) Never remove or rename existing fields.
+ * 4) Always set timestamp_tz when epoch exists.
+ *
+ * No string parsing is required for correctness here because DEV034 asserts
+ * epoch truth already exists (timestamp_sort). We keep it fail-open.
+ *
+ * @param {Array<Object>} incidents
+ * @return {Array<Object>}
+ */
+function CSA_ApplyDev034TimestampFields_(incidents) {
+  if (!Array.isArray(incidents)) return [];
+
+  return incidents.map(function(rec) {
+    if (!rec || typeof rec !== 'object') return rec;
+
+    // Canonical source: timestamp_sort (epoch ms)
+    const sortEpoch = Number(rec.timestamp_sort);
+    if (isFinite(sortEpoch)) {
+      rec.timestamp_epoch_ms = sortEpoch;
+      rec.timestamp_tz = 'America/Phoenix';
+      return rec;
+    }
+
+    // Secondary: preserve existing timestamp_epoch_ms if present
+    const epoch = Number(rec.timestamp_epoch_ms);
+    if (isFinite(epoch)) {
+      rec.timestamp_epoch_ms = epoch;
+      rec.timestamp_tz = 'America/Phoenix';
+      return rec;
+    }
+
+    // Fail-open: do nothing if neither exists
+    return rec;
+  });
+}
