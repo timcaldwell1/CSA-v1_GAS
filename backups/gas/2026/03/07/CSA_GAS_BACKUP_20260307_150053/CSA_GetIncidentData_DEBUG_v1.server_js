@@ -1,0 +1,59 @@
+/**
+ * CSA_GetIncidentData_DEBUG_v1
+ * Debug version of incident fetch to trace why no incidents appear in ?mode=data
+ * CSA_v1 — DEV033 POC Patch
+ * Author: DEV032
+ * Created: 2026-01-27
+ * Version: v0.1
+ * Notes: TEMP — Remove or replace after confirming count > 0
+ */
+function CSA_GetIncidentData_DEBUG_v1(requestId) {
+  const props = PropertiesService.getScriptProperties();
+  const cfg = CSA_GetConfig_();
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  const INCIDENT_SHEET_NAME = (!prefix || prefix === 'incident')
+    ? 'incident_data'
+    : prefix + '_incident_data';
+
+  const ss = SpreadsheetApp.openById(cfg.CSA_SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+  const idx = {};
+  headers.forEach((h, i) => { idx[h.trim()] = i; });
+
+  const incidents = [];
+
+  values.forEach((row, r) => {
+    const incident = {
+      id_a: row[idx["id"]],
+      incident_type: row[idx["incident_type"]],
+      description: row[idx["description"]],
+      latitude: row[idx["latitude"]],
+      longitude: row[idx["longitude"]],
+      timestamp_display: row[idx["timestamp_display"]],
+      timestamp_iso: row[idx["timestamp_iso"]],
+      timestamp_sort: row[idx["timestamp_sort"]]
+    };
+
+    const valid = (incident.latitude && incident.longitude && incident.id_a);
+    if (!valid) {
+      Logger.log(`❌ Dropped row ${r + 2} — missing critical field`);
+      return;
+    }
+
+    Logger.log(`✅ Accepted row ${r + 2}: ` + JSON.stringify(incident));
+    incidents.push(incident);
+  });
+
+  Logger.log(`✅ Total incidents pushed: ${incidents.length}`);
+
+  return {
+    campus: cfg.CSA_CAMPUS_NAME,
+    count: incidents.length,
+    incidents: incidents,
+    error: false,
+    source: 'DEBUG_PATCH'
+  };
+}
