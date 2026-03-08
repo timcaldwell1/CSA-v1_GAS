@@ -1,0 +1,150 @@
+
+/**
+ * FILE: CSA_Push_Latest_GAS_Snapshot_To_GitHub.gs
+ * VERSION: v1.1.2
+ * LAST_UPDATED: 2026-03-07 MST
+ *
+ * PURPOSE
+ * Push the current Apps Script snapshot to GitHub using immutable folders.
+ *
+ * DEV059 UPDATES
+ * 1) Correct snapshot path generation (YYYY/MM/DD).
+ * 2) Use Script Property GITHUB_PAT (fallback to GITHUB_TOKEN).
+ * 3) Guard clause prevents overwrite of existing snapshot folder.
+ *
+ * SNAPSHOT STRUCTURE
+ * backups/gas/YYYY/MM/DD/CSA_GAS_BACKUP_YYYYMMDD_HHMMSS
+ */
+// DEV049 as the canonical Git push mechanism
+// Hygiene candidate
+
+function CSA_Push_Latest_GAS_Snapshot_To_GitHub() {
+
+  const OWNER  = "timcaldwell1";
+  const REPO   = "CSA-v1_GAS";
+  const BRANCH = "main";
+
+  const TOKEN =
+    PropertiesService.getScriptProperties().getProperty("GITHUB_PAT") ||
+    PropertiesService.getScriptProperties().getProperty("GITHUB_TOKEN");
+
+  if (!TOKEN) {
+    throw new Error("Missing Script Property: GITHUB_PAT or GITHUB_TOKEN");
+  }
+
+  const snapshotName = buildSnapshotName_();
+  const path = buildSnapshotPath_(snapshotName);
+
+  Logger.log("Snapshot path: " + path);
+
+  if (githubPathExists_(OWNER, REPO, path, TOKEN)) {
+    throw new Error("Backup aborted. Snapshot folder already exists: " + path);
+  }
+
+  const files = getProjectFiles_();
+
+  files.forEach(function(file) {
+
+    const filePath = path + "/" + file.name;
+
+    const payload = {
+      message: "CSA GAS Snapshot " + snapshotName,
+      content: Utilities.base64Encode(file.source),
+      branch: BRANCH
+    };
+
+    const options = {
+      method: "put",
+      contentType: "application/json",
+      headers: {
+        Authorization: "Bearer " + TOKEN,
+        Accept: "application/vnd.github+json"
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    const url =
+      "https://api.github.com/repos/" +
+      OWNER + "/" +
+      REPO + "/contents/" +
+      filePath;
+
+    const response = UrlFetchApp.fetch(url, options);
+
+    if (response.getResponseCode() >= 300) {
+      throw new Error("GitHub upload failed:\n" + response.getContentText());
+    }
+
+  });
+
+  Logger.log("CSA Git snapshot complete: " + snapshotName);
+
+}
+
+
+
+function buildSnapshotName_() {
+
+  const now = new Date();
+
+  const yyyy = now.getFullYear();
+  const mm   = ("0" + (now.getMonth() + 1)).slice(-2);
+  const dd   = ("0" + now.getDate()).slice(-2);
+  const hh   = ("0" + now.getHours()).slice(-2);
+  const mi   = ("0" + now.getMinutes()).slice(-2);
+  const ss   = ("0" + now.getSeconds()).slice(-2);
+
+  return "CSA_GAS_BACKUP_" + yyyy + mm + dd + "_" + hh + mi + ss;
+
+}
+
+
+
+function buildSnapshotPath_(snapshotName) {
+
+  const yyyy = snapshotName.substring(15,19);
+  const mm   = snapshotName.substring(19,21);
+  const dd   = snapshotName.substring(21,23);
+
+  return "backups/gas/" + yyyy + "/" + mm + "/" + dd + "/" + snapshotName;
+
+}
+
+
+
+function githubPathExists_(owner, repo, path, token) {
+
+  const url =
+    "https://api.github.com/repos/" +
+    owner + "/" +
+    repo + "/contents/" +
+    path;
+
+  const options = {
+    method: "get",
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/vnd.github+json"
+    },
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+
+  return response.getResponseCode() === 200;
+
+}
+
+
+
+/**
+ * NOTE
+ * Replace this stub with your existing GAS export logic if you already
+ * have one in ToolRunner or other DEV utilities.
+ */
+function getProjectFiles_() {
+
+  return [];
+
+}
