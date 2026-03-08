@@ -1,0 +1,85 @@
+/**
+ * @file_name: CSA_QD_ENV_Mock_Promotion_v1.0.gs
+ * @purpose: Q&D utility to promote CSA from TEST/MOCK to PROD/REAL
+ * @scope: Script Properties only (no runtime logic)
+ *
+ * What this does:
+ * 1. Reads current ENV / MOCK values
+ * 2. Updates them to PROD / FALSE (when enabled)
+ * 3. Re-dumps properties for confirmation
+ *
+ * NOTE:
+ * - Backup mission intentionally paused
+ * - Source already exists in Git
+ */
+
+/* ===========================
+ * CONFIG — SAFE DEFAULTS
+ * =========================== */
+
+/**
+ * Set to TRUE to perform the update.
+ * Leave FALSE to run in DRY-RUN mode.
+ */
+const APPLY_CHANGES = true;
+
+/* ===========================
+ * ENTRYPOINT
+ * =========================== */
+
+function CSA_QD_Promote_ENV_and_Mock() {
+  const props = PropertiesService.getScriptProperties();
+  const current = props.getProperties();
+
+  Logger.log('===== CSA Q&D ENV / MOCK PROMOTION =====');
+
+  Logger.log('--- CURRENT VALUES ---');
+  Logger.log('CSA_ENV = ' + current.CSA_ENV);
+  Logger.log('CSA_MOCK_MODE = ' + current.CSA_MOCK_MODE);
+
+  if (!APPLY_CHANGES) {
+    Logger.log('DRY-RUN ONLY — No changes applied.');
+    Logger.log('Set APPLY_CHANGES = true to proceed.');
+    Logger.log('===== END Q&D =====');
+    return;
+  }
+
+  // Guardrails
+  if (current.CSA_INSTALL_STATUS !== 'PASS') {
+    throw new Error('Abort: CSA_INSTALL_STATUS is not PASS');
+  }
+
+  // Apply updates
+  props.setProperty('CSA_ENV', 'PROD');
+  props.setProperty('CSA_MOCK_MODE', 'FALSE');
+
+  Logger.log('--- UPDATED VALUES ---');
+  Logger.log('CSA_ENV = PROD');
+  Logger.log('CSA_MOCK_MODE = FALSE');
+
+  Logger.log('===== CSA ENV PROMOTION COMPLETE =====');
+}
+
+/* ===========================
+ * POST-CHECK (OPTIONAL)
+ * =========================== */
+
+function CSA_QD_Verify_Deploy_Readiness() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+
+  Logger.log('===== CSA DEPLOY READINESS CHECK =====');
+
+  const checks = [
+    ['CSA_INSTALL_STATUS', props.CSA_INSTALL_STATUS === 'PASS'],
+    ['CSA_ENV == PROD', props.CSA_ENV === 'PROD'],
+    ['CSA_MOCK_MODE == FALSE', props.CSA_MOCK_MODE === 'FALSE'],
+    ['CSA_SPREADSHEET_ID exists', !!props.CSA_SPREADSHEET_ID],
+    ['CSA_PROJECT_ID exists', !!props.CSA_PROJECT_ID]
+  ];
+
+  checks.forEach(([label, pass]) => {
+    Logger.log(label + ' : ' + (pass ? 'PASS' : 'FAIL'));
+  });
+
+  Logger.log('===== END READINESS CHECK =====');
+}
