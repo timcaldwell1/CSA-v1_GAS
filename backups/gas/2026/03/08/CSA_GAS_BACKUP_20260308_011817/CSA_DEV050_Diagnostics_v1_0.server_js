@@ -1,0 +1,157 @@
+/**
+ * --------------------------------------------------------------------
+ * File Name: CSA_DEV050_Diagnostics_v1_0.gs
+ * Title: DEV050 Diagnostics (Consolidated from lowercase csa_* probes)
+ * Product: CSA_v1.1 — Church Safety Alerts
+ * Version: v1.0
+ * Status: ACTIVE — DEV050 DIAGNOSTIC MODULE
+ * Thread Lineage: DEV049 → DEV050
+ * Last Updated (MST): 2026-02-20
+ * Authors: Tim Caldwell → DEV050
+ *
+ * Purpose:
+ * - Provide canonical, ToolRunner-callable DEV050 diagnostic helpers.
+ * - These functions are NON-MUTATING and read-only.
+ * - Consolidated from lowercase csa_* probe files to reduce execution surfaces.
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * DEV050: E2E WebApp probe (read-only).
+ * Returns basic status about webapp URL reachability and spreadsheet access.
+ */
+function CSA_DEV050_E2E_WebApp_Probe_() {
+  Logger.log('===== CSA DEV050 E2E WEBAPP PROBE START =====');
+
+  const props = PropertiesService.getScriptProperties();
+  const webAppUrl = props.getProperty('CSA_WEBAPP_URL');
+  const sheetId = props.getProperty('CSA_SPREADSHEET_ID');
+  const env = props.getProperty('CSA_ENV');
+  const prefix = props.getProperty('CSA_SHEET_PREFIX');
+
+  Logger.log('[DEV050][E2E] CSA_ENV=' + env);
+  Logger.log('[DEV050][E2E] CSA_SHEET_PREFIX=' + prefix);
+  Logger.log('[DEV050][E2E] CSA_SPREADSHEET_ID=' + sheetId);
+  Logger.log('[DEV050][E2E] CSA_WEBAPP_URL=' + webAppUrl);
+
+  if (!webAppUrl) {
+    Logger.log('[DEV050][E2E][FAIL] Missing CSA_WEBAPP_URL');
+    return { ok: false, reason: 'MISSING_WEBAPP_URL' };
+  }
+  if (!sheetId) {
+    Logger.log('[DEV050][E2E][FAIL] Missing CSA_SPREADSHEET_ID');
+    return { ok: false, reason: 'MISSING_SPREADSHEET_ID' };
+  }
+
+  // 1) WebApp GET probe
+  let respText = '';
+  let httpCode = -1;
+  try {
+    const resp = UrlFetchApp.fetch(webAppUrl, { muteHttpExceptions: true });
+    httpCode = resp.getResponseCode();
+    respText = resp.getContentText() || '';
+    Logger.log('[DEV050][E2E] WebApp HTTP ' + httpCode);
+    Logger.log('[DEV050][E2E] Body preview (first 800 chars):\n' + respText.substring(0, 800));
+  } catch (e) {
+    Logger.log('[DEV050][E2E][FAIL] UrlFetch exception: ' + String(e));
+    return { ok: false, reason: 'FETCH_EXCEPTION', error: String(e) };
+  }
+
+  // 2) Basic spreadsheet open probe
+  let ssName = '';
+  try {
+    const ss = SpreadsheetApp.openById(sheetId);
+    ssName = ss.getName();
+    Logger.log('[DEV050][E2E] Spreadsheet title: ' + ssName);
+  } catch (e2) {
+    Logger.log('[DEV050][E2E][FAIL] Spreadsheet open exception: ' + String(e2));
+    return { ok: false, reason: 'SHEET_OPEN_EXCEPTION', error: String(e2) };
+  }
+
+  Logger.log('===== CSA DEV050 E2E WEBAPP PROBE END =====');
+  return {
+    ok: true,
+    http_code: httpCode,
+    webapp_body_len: respText.length,
+    spreadsheet_name: ssName
+  };
+}
+
+/**
+ * DEV050: Incident flow debug preview (read-only).
+ * Reads a few rows of <prefix>_incident_data and logs preview.
+ */
+function CSA_DEV050_IncidentFlow_Debug_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('CSA_SPREADSHEET_ID');
+  const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'test3';
+  const sheetName = prefix + '_incident_data';
+
+  if (!id) return { ok: false, reason: 'MISSING_SPREADSHEET_ID' };
+
+  const ss = SpreadsheetApp.openById(id);
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) {
+    Logger.log('[DEV050][IncidentFlow][FAIL] Missing sheet: ' + sheetName);
+    return { ok: false, reason: 'MISSING_SHEET', sheet: sheetName };
+  }
+
+  const lastRow = sh.getLastRow();
+  Logger.log('[DEV050][IncidentFlow] ' + sheetName + ' lastRow=' + lastRow);
+
+  if (lastRow <= 1) {
+    Logger.log('[DEV050][IncidentFlow] No data rows present.');
+    return { ok: true, row_count: 0 };
+  }
+
+  const values = sh.getRange(2, 1, Math.min(5, lastRow - 1), sh.getLastColumn()).getValues();
+  Logger.log('[DEV050][IncidentFlow] Preview rows=' + values.length);
+  Logger.log(JSON.stringify(values));
+
+  return { ok: true, row_count: (lastRow - 1), preview_rows: values.length };
+}
+
+/**
+ * DEV050: DataBridge runtime probe (read-only).
+ * Logs key runtime identity + property posture.
+ */
+function CSA_DEV050_DataBridge_RuntimeProbe_() {
+  const props = PropertiesService.getScriptProperties();
+  const probe = {
+    probe_id: 'CSA_DEV050_DATABRIDGE_RUNTIME_PROBE',
+    script_id: ScriptApp.getScriptId(),
+    tz: Session.getScriptTimeZone(),
+    now_iso: new Date().toISOString(),
+    env: props.getProperty('CSA_ENV'),
+    prefix: props.getProperty('CSA_SHEET_PREFIX'),
+    spreadsheet_id: props.getProperty('CSA_SPREADSHEET_ID')
+  };
+
+  Logger.log('[DEV050][DataBridgeProbe] ' + JSON.stringify(probe));
+  return { ok: true, probe: probe };
+}
+
+/**
+ * DEV050: Probe incident flow sheets existence (read-only).
+ */
+function CSA_DEV050_Probe_IncidentFlow_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('CSA_SPREADSHEET_ID');
+  const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'test3';
+
+  if (!id) return { ok: false, reason: 'MISSING_SPREADSHEET_ID' };
+
+  const ss = SpreadsheetApp.openById(id);
+  const incidentSheet = ss.getSheetByName(prefix + '_incident_data');
+  const discardedSheet = ss.getSheetByName(prefix + '_discarded_events');
+
+  const out = {
+    ok: true,
+    prefix: prefix,
+    incident_data_exists: !!incidentSheet,
+    discarded_events_exists: !!discardedSheet
+  };
+
+  Logger.log('[DEV050][IncidentFlowProbe] ' + JSON.stringify(out));
+  return out;
+}
