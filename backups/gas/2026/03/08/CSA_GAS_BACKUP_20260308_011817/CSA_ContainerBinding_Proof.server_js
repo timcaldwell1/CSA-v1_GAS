@@ -1,0 +1,77 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_ContainerBinding_Proof.gs
+ * title: Container Binding Verification Probe
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: DEPRECATED — Historical deployment probe
+ *
+ * thread_lineage:
+ * PRE-DEV015 diagnostic utilities
+ *
+ * execution_role:
+ * One-time verification that the GAS project is correctly bound
+ * to the operational spreadsheet container.
+ *
+ * governance_classification:
+ * H2 — Reductive Cleanup Candidate
+ *
+ * mutation_surface:
+ * NONE — read-only diagnostic
+ *
+ * description:
+ * Early deployment helper used to confirm spreadsheet container
+ * binding during initial CSA setup. Superseded by modern
+ * diagnostics and ToolRunner verification routines.
+ * --------------------------------------------------------------------
+ */
+
+function CSA_ProveContainerBinding_() {
+  Logger.log('===== CSA CONTAINER BINDING PROOF =====');
+
+  // 1) Attempt to access the active spreadsheet
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (!ss) {
+      Logger.log('❌ RESULT: SpreadsheetApp.getActiveSpreadsheet() returned NULL');
+      Logger.log('❌ VERDICT: NOT CONTAINER-BOUND');
+      return;
+    }
+
+    Logger.log('✅ Active Spreadsheet ID: ' + ss.getId());
+    Logger.log('✅ Active Spreadsheet Name: ' + ss.getName());
+
+  } catch (err) {
+    Logger.log('❌ EXCEPTION calling SpreadsheetApp.getActiveSpreadsheet()');
+    Logger.log('❌ ERROR: ' + err.message);
+    Logger.log('❌ VERDICT: NOT CONTAINER-BOUND');
+    return;
+  }
+
+  // 2) Attempt to access UI (read-only call)
+  try {
+    const ui = SpreadsheetApp.getUi();
+    if (ui) {
+      Logger.log('✅ Spreadsheet UI object acquired');
+    }
+  } catch (err) {
+    Logger.log('⚠️ UI access failed (this can be permission-related)');
+    Logger.log('⚠️ ERROR: ' + err.message);
+  }
+
+  // 3) Script metadata
+  try {
+    const scriptId = ScriptApp.getScriptId();
+    Logger.log('ℹ️ Script ID: ' + scriptId);
+  } catch (err) {
+    Logger.log('⚠️ Unable to read Script ID: ' + err.message);
+  }
+
+  // 4) Final verdict
+  Logger.log('--------------------------------------');
+  Logger.log('✅ FINAL VERDICT: THIS SCRIPT IS CONTAINER-BOUND');
+  Logger.log('✅ BINDING TYPE: GOOGLE SPREADSHEET');
+  Logger.log('===== END PROOF =====');
+}
