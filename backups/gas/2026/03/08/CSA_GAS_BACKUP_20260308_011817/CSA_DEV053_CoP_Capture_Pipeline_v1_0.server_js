@@ -1,0 +1,268 @@
+/**
+ * file_name: CSA_DEV053_CoP_Capture_Pipeline_v1_0.gs
+ * title: DEV053 CoP Capture Pipeline (RAW → QUEUE → FREEZE + Keyword Patch)
+ * product: CSA_v1.0 — Church Safety Alerts
+ * version: v1.0
+ * status: WORKING
+ * thread_lineage: DEV051 → DEV052 → DEV053
+ * last_updated: 2026-02-23 2:45PM MST -tim
+ *
+ * Purpose:
+ * - Non-coder ToolRunner execution for CoP capture staging.
+ * - Build contract-clean queue rows from <prefix>_cop_calls_raw into <prefix>_poc_ingest_queue.
+ * - Enforce RawPubDate as TEXT (verbatim string).
+ * - Freeze queue (values-only).
+ * - Ensure keyword phrase "shots fired" exists as SIGNAL (sheet-driven).
+ *
+ * Hygiene Notes:
+ * - No triggers, no menus.
+ * - No Script Properties mutation.
+ * - Prefix allowlist for these tools is intentionally narrow. //HARDCODED
+ */
+
+var CSA_DEV053_COP = {
+  //HARDCODED — CoP raw capture headers (authoritative export columns)
+  RAW_HEADERS: [
+    '_id',
+    'INCIDENT_NUM',
+    'DISP_CODE',
+    'DISPOSITION',
+    'FINAL_RADIO_CODE',
+    'FINAL_CALL_TYPE',
+    'CALL_RECEIVED',
+    'HUNDREDBLOCKADDR',
+    'GRID'
+  ],
+
+  // Queue contract headers (authoritative)
+  QUEUE_HEADERS: ['incident_id', 'incident_type', 'description', 'location', 'RawPubDate'],
+
+  //HARDCODED — For safety, capture tools run only on these lane prefixes by default
+  ALLOWED_LANE_PREFIXES: ['test5_', 'test6_']
+};
+
+function CSA_DEV053_OpenSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+  try {
+    if (ssId) return SpreadsheetApp.openById(ssId);
+  } catch (e) {}
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function CSA_DEV053_NormalizePrefix_(raw) {
+  var p = String(raw || '').trim();
+  if (!p) return '';
+  p = p.replace(/_+$/g, '');
+  return p + '_';
+}
+
+function CSA_DEV053_AssertDevEnvOrThrow_() {
+  var env = String(PropertiesService.getScriptProperties().getProperty('CSA_ENV') || '').toUpperCase();
+  if (env === 'PROD') throw new Error('DEV053: Refused (CSA_ENV=PROD).');
+  if (env !== 'DEV') throw new Error('DEV053: Refused (CSA_ENV must be DEV).');
+}
+
+function CSA_DEV053_ValidateLanePrefix_(prefix) {
+  var p = CSA_DEV053_NormalizePrefix_(prefix);
+  if (CSA_DEV053_COP.ALLOWED_LANE_PREFIXES.indexOf(p) === -1) {
+    // Fail gracefully (non-PROD): return structured error
+    Logger.log('[DEV053][GUARD] Refused lane prefix=%s allowed=%s',
+               p, CSA_DEV053_COP.ALLOWED_LANE_PREFIXES.join(','));
+    return { ok: false, error: 'REFUSED_PREFIX', prefix: p, allowed: CSA_DEV053_COP.ALLOWED_LANE_PREFIXES };
+  }
+  return { ok: true, prefix: p };
+}
+
+function CSA_DEV053_GetSheetRequired_(ss, name) {
+  var sh = ss.getSheetByName(name);
+  if (!sh) throw new Error('DEV053: Missing required sheet: ' + name);
+  return sh;
+}
+
+function CSA_DEV053_ReadHeader_(sheet) {
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  var vals = sheet.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
+  return vals.map(function (s) { return String(s || '').trim(); });
+}
+
+function CSA_DEV053_IndexHeader_(hdr) {
+  var map = {};
+  for (var i = 0; i < hdr.length; i++) map[String(hdr[i] || '').trim()] = i;
+  return map;
+}
+
+function CSA_DEV053_SetHeader_(sheet, headers) {
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function CSA_DEV053_ClearBelowHeader_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  if (lastRow <= 1) return;
+  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+}
+
+function CSA_DEV053_CoP_BuildQueueFromRaw_(lanePrefix) {
+  CSA_DEV053_AssertDevEnvOrThrow_();
+
+  var chk = CSA_DEV053_ValidateLanePrefix_(lanePrefix);
+  if (!chk.ok) return chk;
+  var prefix = chk.prefix;
+
+  var ss = CSA_DEV053_OpenSpreadsheet_();
+
+  var shRaw = CSA_DEV053_GetSheetRequired_(ss, prefix + 'cop_calls_raw');
+  var shQueue = CSA_DEV053_GetSheetRequired_(ss, prefix + 'poc_ingest_queue');
+
+  // Validate RAW headers
+  var rawHdr = CSA_DEV053_ReadHeader_(shRaw);
+  var rawIdx = CSA_DEV053_IndexHeader_(rawHdr);
+
+  for (var i = 0; i < CSA_DEV053_COP.RAW_HEADERS.length; i++) {
+    var h = CSA_DEV053_COP.RAW_HEADERS[i];
+    if (rawIdx[h] === undefined) throw new Error('DEV053: RAW missing header: ' + h);
+  }
+
+  // Ensure queue header
+  CSA_DEV053_SetHeader_(shQueue, CSA_DEV053_COP.QUEUE_HEADERS);
+  CSA_DEV053_ClearBelowHeader_(shQueue);
+
+  var lastRow = shRaw.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('[DEV053][QUEUE] No RAW rows found.');
+    return { ok: true, prefix: prefix, raw_rows: 0, queued_rows: 0 };
+  }
+
+  // Use display values to preserve RawPubDate verbatim string
+  var rawData = shRaw.getRange(2, 1, lastRow - 1, shRaw.getLastColumn()).getDisplayValues();
+
+  var out = [];
+  var skipped = 0;
+
+  for (var r = 0; r < rawData.length; r++) {
+    var row = rawData[r];
+
+    var incidentNum = String(row[rawIdx['INCIDENT_NUM']] || '').trim();
+    if (!incidentNum) { skipped++; continue; }
+
+    var finalCallType = String(row[rawIdx['FINAL_CALL_TYPE']] || '').trim();
+    var finalRadioCode = String(row[rawIdx['FINAL_RADIO_CODE']] || '').trim();
+    var dispCode = String(row[rawIdx['DISP_CODE']] || '').trim();
+    var disposition = String(row[rawIdx['DISPOSITION']] || '').trim();
+    var grid = String(row[rawIdx['GRID']] || '').trim();
+    var hundredBlock = String(row[rawIdx['HUNDREDBLOCKADDR']] || '').trim();
+    var callReceived = String(row[rawIdx['CALL_RECEIVED']] || '').trim(); // verbatim-ish display string
+
+    var descParts = [
+      finalRadioCode,
+      finalCallType,
+      dispCode,
+      disposition,
+      ('GRID=' + grid)
+    ].filter(function (x) { return !!x; });
+
+    var description = descParts.join(' | ');
+    var location = hundredBlock ? (hundredBlock + ', Phoenix, AZ') : '';
+
+    out.push([
+      incidentNum,
+      finalCallType,
+      description,
+      location,
+      callReceived
+    ]);
+  }
+
+  if (out.length > 0) {
+    // Force RawPubDate column to TEXT before write (verbatim string contract)
+    //HARDCODED — RawPubDate must be TEXT
+    shQueue.getRange(2, 5, out.length, 1).setNumberFormat('@');
+    shQueue.getRange(2, 1, out.length, CSA_DEV053_COP.QUEUE_HEADERS.length).setValues(out);
+  }
+
+  Logger.log('[DEV053][QUEUE] prefix=%s raw_rows=%s queued=%s skipped_blank_id=%s',
+             prefix, rawData.length, out.length, skipped);
+
+  return { ok: true, prefix: prefix, raw_rows: rawData.length, queued_rows: out.length, skipped_blank_id: skipped };
+}
+
+function CSA_DEV053_CoP_FreezeQueue_(lanePrefix) {
+  CSA_DEV053_AssertDevEnvOrThrow_();
+
+  var chk = CSA_DEV053_ValidateLanePrefix_(lanePrefix);
+  if (!chk.ok) return chk;
+  var prefix = chk.prefix;
+
+  var ss = CSA_DEV053_OpenSpreadsheet_();
+  var shQueue = CSA_DEV053_GetSheetRequired_(ss, prefix + 'poc_ingest_queue');
+
+  // Ensure header is correct
+  CSA_DEV053_SetHeader_(shQueue, CSA_DEV053_COP.QUEUE_HEADERS);
+
+  var lastRow = shQueue.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('[DEV053][FREEZE] No queue rows to freeze.');
+    return { ok: true, prefix: prefix, frozen_rows: 0 };
+  }
+
+  var rng = shQueue.getRange(2, 1, lastRow - 1, CSA_DEV053_COP.QUEUE_HEADERS.length);
+
+  // Force RawPubDate to TEXT (again) and rewrite values-only
+  //HARDCODED — RawPubDate must remain TEXT
+  shQueue.getRange(2, 5, lastRow - 1, 1).setNumberFormat('@');
+
+  var vals = rng.getDisplayValues(); // values-only snapshot intent
+  rng.setValues(vals);
+
+  Logger.log('[DEV053][FREEZE] prefix=%s frozen_rows=%s', prefix, (lastRow - 1));
+  return { ok: true, prefix: prefix, frozen_rows: (lastRow - 1) };
+}
+
+function CSA_DEV053_EnsureShotsFiredKeyword_(lanePrefix) {
+  CSA_DEV053_AssertDevEnvOrThrow_();
+
+  var chk = CSA_DEV053_ValidateLanePrefix_(lanePrefix);
+  if (!chk.ok) return chk;
+  var prefix = chk.prefix;
+
+  var ss = CSA_DEV053_OpenSpreadsheet_();
+  var shKw = CSA_DEV053_GetSheetRequired_(ss, prefix + 'keyword_defs');
+
+  var hdr = CSA_DEV053_ReadHeader_(shKw);
+  var idx = CSA_DEV053_IndexHeader_(hdr);
+
+  var required = ['keyword', 'taxonomy_class', 'base_weight', 'active', 'campus', 'notes'];
+  for (var i = 0; i < required.length; i++) {
+    if (idx[required[i]] === undefined) throw new Error('DEV053: keyword_defs missing header: ' + required[i]);
+  }
+
+  var lastRow = shKw.getLastRow();
+  var existing = (lastRow > 1)
+    ? shKw.getRange(2, 1, lastRow - 1, shKw.getLastColumn()).getDisplayValues()
+    : [];
+
+  var want = 'shots fired';
+  for (var r = 0; r < existing.length; r++) {
+    var k = String(existing[r][idx['keyword']] || '').trim().toLowerCase();
+    var tax = String(existing[r][idx['taxonomy_class']] || '').trim().toUpperCase();
+    if (k === want && tax === 'SIGNAL') {
+      Logger.log('[DEV053][KW] shots fired already present.');
+      return { ok: true, prefix: prefix, added: false };
+    }
+  }
+
+  // Append keyword row
+  //HARDCODED — PoC base_weight=5; active=Y; campus=*
+  var row = new Array(hdr.length).fill('');
+  row[idx['keyword']] = 'shots fired';
+  row[idx['taxonomy_class']] = 'SIGNAL';
+  row[idx['base_weight']] = 5;
+  row[idx['active']] = 'Y';
+  row[idx['campus']] = '*';
+  row[idx['notes']] = 'DEV053: CoP dominant phrase support (no synonym mapping to shooting)';
+
+  shKw.appendRow(row);
+  Logger.log('[DEV053][KW] appended SIGNAL keyword: shots fired');
+  return { ok: true, prefix: prefix, added: true };
+}
