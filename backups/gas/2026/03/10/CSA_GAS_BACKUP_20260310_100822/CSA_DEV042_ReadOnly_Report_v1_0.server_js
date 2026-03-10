@@ -1,0 +1,274 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_DEV042_ReadOnly_Report_v1_0.gs
+ * @title: DEV042 Read-Only Reporting (Script Properties + Function Inventory)
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.0.0-DEV042
+ * @binder_type: DEV Insert (Read-only report; Binder/Handoff safe)
+ * @current_phase: Governance Tightening / Evidence Capture
+ *
+ * @thread_lineage:
+ *   DEV041 (Stable checkpoint verifier)
+ *   → DEV042 (Operator read-only reporting reintroduced via ToolRunner)
+ *
+ * @create_date: 2026-02-13 05:00 MST
+ * @last_updated: 2026-02-13 05:00 MST
+ * @authors: DEV042
+ *
+ * Notes:
+ * - READ-ONLY by design: does not write properties, sheets, triggers, or drive files.
+ * - Produces two outputs:
+ *   1) binder_markdown (redacted by default; safe to paste into binder)
+ *   2) report_json (machine-readable; also redacted by default)
+ * - Secrets are redacted if key name contains PAT/TOKEN/SECRET/KEY (case-insensitive).
+ * --------------------------------------------------------------------
+ */
+
+
+/**
+ * Build a read-only report (no side effects).
+ *
+ * options = {
+ *   mode: 'REDACTED' | 'RAW',
+ *   include_properties: true|false,
+ *   include_function_names: true|false,
+ *   include_identity: true|false,
+ *   include_triggers: true|false
+ * }
+ */
+function CSA_DEV042_BuildReadOnlyReport_(options) {
+  options = options || {};
+  var mode = (options.mode === 'RAW') ? 'RAW' : 'REDACTED';
+
+  var now = new Date();
+  var generated_at_mst = CSA_DEV042_FormatMST_(now);
+
+  var report = {
+    ok: true,
+    mode: mode,
+    generated_at_mst: generated_at_mst,
+    identity: null,
+    triggers: null,
+    properties: null,
+    functions: null
+  };
+
+  if (options.include_identity !== false) {
+    report.identity = {
+      script_id: ScriptApp.getScriptId(),
+      script_timezone: Session.getScriptTimeZone()
+    };
+  }
+
+  if (options.include_triggers !== false) {
+    report.triggers = CSA_DEV042_ReadTriggers_();
+  }
+
+  if (options.include_properties !== false) {
+    report.properties = CSA_DEV042_ReadScriptProperties_(mode);
+  }
+
+  if (options.include_function_names !== false) {
+    report.functions = CSA_DEV042_ReadFunctionInventory_();
+  }
+
+  var binder_markdown = CSA_DEV042_RenderBinderMarkdown_(report);
+  return {
+    ok: true,
+    mode: mode,
+    generated_at_mst: generated_at_mst,
+    binder_markdown: binder_markdown,
+    report_json: report
+  };
+}
+
+
+/* ============================================================
+   READERS (READ-ONLY)
+============================================================ */
+
+function CSA_DEV042_ReadScriptProperties_(mode) {
+  var all = PropertiesService.getScriptProperties().getProperties();
+  var keys = Object.keys(all).sort();
+
+  var out = [];
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var v = String(all[k]);
+
+    var isSecret = CSA_DEV042_IsSecretKey_(k);
+    var displayValue;
+
+    if (mode === 'RAW') {
+      displayValue = v;
+    } else {
+      // REDACTED
+      if (isSecret) {
+        displayValue = '[REDACTED] sha256_12=' + CSA_DEV042_Sha256_12_(v) + ' len=' + v.length;
+      } else {
+        // Prevent binder bloat: baseline JSON is huge; show summary only.
+        if (k === 'CSA_DEV041_STABLE_CHECKPOINT_BASELINE_JSON') {
+          displayValue = '[BASELINE_JSON] len=' + v.length + ' sha256_12=' + CSA_DEV042_Sha256_12_(v);
+        } else {
+          displayValue = v;
+        }
+      }
+    }
+
+    out.push({
+      key: k,
+      value: displayValue,
+      secret: isSecret
+    });
+  }
+
+  return {
+    count: out.length,
+    items: out
+  };
+}
+
+function CSA_DEV042_ReadFunctionInventory_() {
+  var names = [];
+  var g = (typeof globalThis !== 'undefined') ? globalThis : this;
+
+  Object.getOwnPropertyNames(g).forEach(function(n) {
+    try {
+      if (typeof g[n] !== 'function') return;
+      // Include likely project functions and helpers; exclude common host objects implicitly by naming.
+      if (
+        n.indexOf('CSA_') === 0 ||
+        n.indexOf('csa_') === 0 ||
+        n.indexOf('DEV') === 0 ||
+        n.indexOf('_') === 0 ||
+        n.indexOf('onOpen') === 0 ||
+        n.indexOf('doGet') === 0
+      ) {
+        names.push(n);
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
+
+  names.sort();
+  return {
+    count: names.length,
+    names: names
+  };
+}
+
+function CSA_DEV042_ReadTriggers_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var out = triggers.map(function(t) {
+    var handler = '';
+    try { handler = t.getHandlerFunction(); } catch (e) {}
+    return {
+      handler: handler,
+      event_type: String(t.getEventType()),
+      source: String(t.getTriggerSource())
+    };
+  });
+
+  out.sort(function(a, b) {
+    return a.handler < b.handler ? -1 : (a.handler > b.handler ? 1 : 0);
+  });
+
+  return { count: out.length, triggers: out };
+}
+
+
+/* ============================================================
+   RENDERER (Binder-ready)
+============================================================ */
+
+function CSA_DEV042_RenderBinderMarkdown_(report) {
+  var lines = [];
+
+  lines.push('# DEV042 — Read-Only Report (Script Properties + Function Inventory)');
+  lines.push('');
+  lines.push('- Product: CSA_v1 — Church Safety Alerts');
+  lines.push('- Report Mode: ' + report.mode + ' (REDACTED is binder-safe)');
+  lines.push('- Generated At (MST): ' + report.generated_at_mst);
+  lines.push('');
+
+  // Identity
+  if (report.identity) {
+    lines.push('## Identity');
+    lines.push('');
+    lines.push('- Script ID: `' + report.identity.script_id + '`');
+    lines.push('- Script Timezone: `' + report.identity.script_timezone + '`');
+    lines.push('');
+  }
+
+  // Triggers
+  if (report.triggers) {
+    lines.push('## Triggers');
+    lines.push('');
+    lines.push('- Trigger Count: **' + report.triggers.count + '**');
+    if (report.triggers.count > 0) {
+      lines.push('');
+      lines.push('| Handler | Event Type | Source |');
+      lines.push('|---|---|---|');
+      report.triggers.triggers.forEach(function(t) {
+        lines.push('| `' + (t.handler || '') + '` | `' + t.event_type + '` | `' + t.source + '` |');
+      });
+    }
+    lines.push('');
+  }
+
+  // Properties
+  if (report.properties) {
+    lines.push('## Script Properties');
+    lines.push('');
+    lines.push('- Property Count: **' + report.properties.count + '**');
+    lines.push('');
+    lines.push('| Key | Value | Secret? |');
+    lines.push('|---|---|---|');
+
+    report.properties.items.forEach(function(p) {
+      // keep markdown table stable: escape pipes in value
+      var safeVal = String(p.value).replace(/\|/g, '\\|');
+      lines.push('| `' + p.key + '` | ' + safeVal + ' | ' + (p.secret ? 'YES' : 'NO') + ' |');
+    });
+
+    lines.push('');
+  }
+
+  // Functions
+  if (report.functions) {
+    lines.push('## Function Inventory');
+    lines.push('');
+    lines.push('- Function Count: **' + report.functions.count + '**');
+    lines.push('');
+    lines.push('```text');
+    report.functions.names.forEach(function(n) { lines.push(n); });
+    lines.push('```');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+
+/* ============================================================
+   HELPERS
+============================================================ */
+
+function CSA_DEV042_IsSecretKey_(key) {
+  var k = String(key).toUpperCase();
+  return (k.indexOf('PAT') >= 0 || k.indexOf('TOKEN') >= 0 || k.indexOf('SECRET') >= 0 || k.indexOf('KEY') >= 0);
+}
+
+function CSA_DEV042_Sha256_12_(s) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8);
+  var hex = bytes.map(function(b) {
+    var v = (b < 0 ? b + 256 : b);
+    return ('0' + v.toString(16)).slice(-2);
+  }).join('');
+  return hex.slice(0, 12);
+}
+
+function CSA_DEV042_FormatMST_(d) {
+  return Utilities.formatDate(d, 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST';
+}
