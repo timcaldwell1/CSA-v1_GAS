@@ -1,0 +1,89 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_QD_Api_Verify.gs
+ * title: Quick Diagnostics — API Verification (Disabled)
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: DISABLED — Fully commented legacy diagnostic
+ *
+ * thread_lineage:
+ * Early QD diagnostics
+ *
+ * execution_role:
+ * Historical API verification probe used during early testing.
+ *
+ * governance_classification:
+ * H2 — Reductive Cleanup Candidate
+ *
+ * mutation_surface:
+ * NONE
+ *
+ * description:
+ * Entire script is commented out and no longer participates in runtime
+ * or operator surfaces. Retained only for historical reference.
+ *
+ * last_updated: 2026-03-08 MST
+ * --------------------------------------------------------------------
+ */
+
+
+/*
+function CSA_QD_VerifyApis() {
+  Logger.log('===== CSA Q&D API VERIFICATION =====');
+
+  // --- Identity sanity ---
+  Logger.log('Effective User: ' + Session.getEffectiveUser().getEmail());
+  Logger.log('Script ID: ' + ScriptApp.getScriptId());
+
+  // --- Drive API check ---
+  try {
+    const about = Drive.About.get({ fields: 'user,storageQuota' });
+    Logger.log('Drive API: PASS');
+    Logger.log('Drive User: ' + about.user.emailAddress);
+  } catch (e) {
+    Logger.log('Drive API: FAIL');
+    Logger.log(e.toString());
+  }
+
+  // --- Apps Script API check ---
+  try {
+    const content = Script.Projects.getContent(ScriptApp.getScriptId());
+    if (content && content.files) {
+      Logger.log('Apps Script API: PASS');
+      Logger.log('Files detected: ' + content.files.length);
+    } else {
+      Logger.log('Apps Script API: FAIL (no files returned)');
+    }
+  } catch (e) {
+    Logger.log('Apps Script API: FAIL');
+    Logger.log(e.toString());
+  }
+
+  Logger.log('===== END VERIFICATION =====');
+}
+
+/**
+ * Q&D: Container Binding Verification
+ * Confirms whether this Apps Script project is bound to a Google Sheet.
+ */
+/*
+function CSA_QD_VerifyContainerBinding() {
+  Logger.log('===== CSA Q&D CONTAINER BINDING CHECK =====');
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) {
+      Logger.log('Container-bound: YES');
+      Logger.log('Bound Sheet Name: ' + ss.getName());
+      Logger.log('Bound Sheet ID: ' + ss.getId());
+      Logger.log('Bound Sheet URL: ' + ss.getUrl());
+    }
+  } catch (e) {
+    Logger.log('Container-bound: NO');
+    Logger.log('Reason: SpreadsheetApp not available or no active container.');
+  }
+
+  Logger.log('===== END CONTAINER CHECK =====');
+}
+ **/
