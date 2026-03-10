@@ -1,0 +1,66 @@
+/** runtime_classification: LOCKED_RUNTIME_SPINE
+ * --------------------------------------------------------------------
+ * file_name: CSA_DEV053_Meta_v1_0.gs
+ * title: DEV053 Metadata Utilities
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: ACTIVE — Metadata Support Surface
+ *
+ * thread_lineage:
+ * DEV053
+ *
+ * last_updated: 2026-03-08 MST
+ *
+ * execution_role:
+ * Metadata utilities used for prefix separation, environment
+ * enforcement, and pipeline metadata normalization.
+ *
+ * governance_classification:
+ * H0 — Runtime support infrastructure
+ *
+ * mutation_surface:
+ * METADATA — determined by underlying functions
+ *
+ * description:
+ * Canonical governed header applied during DEV061 header
+ * completeness maintenance. No logic changes.
+ * --------------------------------------------------------------------
+ */
+
+
+function CSA_DEV053_EnsureMetaSheet_(prefix) {
+  const ss = SpreadsheetApp.getActive();
+  const name = prefix + '_meta';
+  let sheet = ss.getSheetByName(name);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.getRange(1,1,1,2).setValues([['key','value']]);
+    sheet.getRange(2,1,4,2).setValues([
+      ['schema_version','1.3.0'],
+      ['created_at', new Date().toISOString()],
+      ['last_migrated_at', new Date().toISOString()],
+      ['owner','CSA_v1']
+    ]);
+  }
+
+  return sheet;
+}
+
+function CSA_DEV053_AssertSchemaVersion_(prefix, expected) {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(prefix + '_meta');
+  if (!sheet) throw new Error('Meta sheet missing for prefix: ' + prefix);
+
+  const data = sheet.getRange(2,1,sheet.getLastRow()-1,2).getValues();
+  const map = {};
+  data.forEach(r => map[r[0]] = r[1]);
+
+  if (map['schema_version'] !== expected) {
+    throw new Error(
+      'Schema mismatch. Expected ' + expected +
+      ', found ' + map['schema_version']
+    );
+  }
+}
