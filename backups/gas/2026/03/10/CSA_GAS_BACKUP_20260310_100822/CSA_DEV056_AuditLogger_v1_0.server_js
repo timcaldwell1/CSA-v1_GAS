@@ -1,0 +1,271 @@
+/** runtime_classification: LOCKED_RUNTIME_SPINE
+ * --------------------------------------------------------------------
+ * file_name: CSA_DEV056_AuditLogger_v1_0.gs
+ * title: DEV056 Audit Logger
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: ACTIVE — Canonical Audit Logging Surface
+ *
+ * thread_lineage:
+ * DEV056
+ *
+ * last_updated: 2026-03-08 MST
+ *
+ * execution_role:
+ * Canonical audit logging infrastructure for CSA runtime activity.
+ *
+ * governance_classification:
+ * H0 — Observability / audit infrastructure
+ *
+ * mutation_surface:
+ * LOG WRITES — writes to audit log surface
+ *
+ * description:
+ * Canonical governed header for DEV056 audit logging module.
+ * Header normalization only. No runtime logic changes.
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * ============================================================================
+ * File Name: CSA_DEV056_AuditLogger_v1_0.gs
+ * Title: DEV056 — Audit Logger (V2) + Legacy Migration + Safe Hooks
+ * Product: CSA_v1.0 — Church Safety Alerts
+ * Artifact Namespace: CSA_v1.1
+ * Version: v1.0 (DEV056) + DEV058 Patch (timestamp/prefix/user/run_id alignment)
+ * Status: WORKING — Logging Contract Alignment (Audit Surface)
+ *
+ * Thread Lineage:
+ * DEV048 (Safe hooks + prefix normalization) →
+ * DEV050 (Observability posture) →
+ * DEV055 (Prefix triplet posture + stability) →
+ * DEV056 (Audit schema + migration) →
+ * DEV058 (QA logging drift exercise + corrective patch)
+ *
+ * Purpose:
+ * - Provide a canonical append-only audit logging surface per campus prefix:
+ *   <prefix>_audit_log
+ * - Enforce governed audit schema (V2) while supporting legacy V1 schema detection
+ *   and migration to V2 without breaking runtime flows.
+ * - Provide a stable audit hook target consumed by ingest harnesses and safe hooks
+ *   (including DEV048 safe audit hook patterns).
+ *
+ * Key Behaviors (What this file actually does):
+ * 1) Canonical Writer (CSA_LogAudit_)
+ *    - Resolves prefix/environment from Script Properties (CSA_SHEET_PREFIX, CSA_ENV)
+ *    - Opens spreadsheet via CSA_SPREADSHEET_ID
+ *    - Ensures audit sheet exists; creates if missing
+ *    - Validates header schema:
+ *        V2 (10 cols): id, timestamp_mst, action, status, source, env, prefix, user, run_id, details_json
+ *        V1 (7 cols):  id, timestamp, action, source, details, user, run_id
+ *    - If V1 detected, runs migration to V2 and continues
+ *    - Fail-open posture: logger never throws; on internal failure attempts CSA_LogError_
+ *
+ * 2) Legacy → V2 Migration (CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_)
+ *    - Reads legacy rows, rewrites into V2 format
+ *    - Preserves legacy fields (id, timestamp, action, source, user, run_id)
+ *    - Wraps legacy "details" into details_json
+ *    - Guardrails: refuses unknown schema (neither V1 nor V2)
+ *
+ * 3) Safe Hook Target (CSA_AUDIT_LogIngestEvent_)
+ *    - Normalizes arbitrary payloads into CSA_LogAudit_ calls
+ *    - Intended for use by “safe audit hook” patterns across DEV048/DEV053+
+ *
+ * DEV058 Patch Notes (Why this changed during DEV058):
+ * - timestamp_mst must be written as Phoenix-local MST string, not UTC/Zulu.
+ *   Preferred: CSA_DEV041_FormatMST_(new Date()) → "YYYY-MM-DD HH:mm:ss MST"
+ *   Fallback: Utilities.formatDate(..., "America/Phoenix", "yyyy-MM-dd HH:mm:ss") + " MST"
+ * - prefix column must be the campus prefix (e.g., "test5"), not run_id.
+ * - user column must be populated when possible (Session.getActiveUser().getEmail()) else "SYSTEM".
+ * - run_id must be written to run_id column; caller-provided run_id preserved.
+ *
+ * Inputs / Dependencies:
+ * - Script Properties: CSA_ENV, CSA_SHEET_PREFIX, CSA_SPREADSHEET_ID
+ * - Optional: CSA_DEV041_FormatMST_ (preferred MST formatter)
+ * - Optional: CSA_LogError_ (fail-open error capture)
+ *
+ * Outputs:
+ * - Appends rows to <prefix>_audit_log (append-only)
+ * - May create <prefix>_audit_log and/or rewrite it during migration
+ *
+ * Safety / Constraints:
+ * - Append-only; never edits prior rows except during explicit migration operation.
+ * - Logger must never throw; failures degrade to execution log + optional CSA_LogError_.
+ *
+ * Last Updated (MST): 2026-03-03
+ * Authors: Tim Caldwell; DEV056-Author; DEV017-Author (G)
+ * ============================================================================
+ */
+
+var CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS = [
+  'id','timestamp_mst','action','status','source','env','prefix','user','run_id','details_json'
+];
+
+var CSA_DEV056_AUDIT_SCHEMA_V1_HEADERS = [
+  'id','timestamp','action','source','details','user','run_id'
+];
+
+function CSA_LogAudit_(action, status, source, detailsObj) {
+  try {
+    var ctx = CSA_DEV056__getContext_();
+    var ss = CSA_DEV056__openSpreadsheet_(ctx);
+    var sheetName = ctx.prefix + '_audit_log';
+
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+      CSA_DEV056__setHeader_(sh, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+    }
+
+    var state = CSA_DEV056__getHeaderState_(sh);
+
+    if (state.isLegacyV1) {
+      CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_(ctx.prefix);
+      sh = ss.getSheetByName(sheetName);
+      state = CSA_DEV056__getHeaderState_(sh);
+    }
+
+    if (!state.isV2) {
+      try { CSA_LogError_(new Error('AUDIT_LOG_SCHEMA_MISMATCH: ' + state.summary), 'CSA_LogAudit_'); } catch (ignored) {}
+      return { ok: false, error: 'AUDIT_LOG_SCHEMA_MISMATCH', sheet: sheetName };
+    }
+
+    var runId = (detailsObj && detailsObj.run_id) ? String(detailsObj.run_id) : Utilities.getUuid();
+    var actor = CSA_DEV056__getActor_();
+
+    var tsMst = (typeof CSA_DEV041_FormatMST_ === 'function')
+      ? CSA_DEV041_FormatMST_(new Date())
+      : (Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST');
+
+    var row = [
+      Utilities.getUuid(),
+      tsMst,
+      String(action || ''),
+      String(status || ''),
+      String(source || ''),
+      String(ctx.env || ''),
+      String(ctx.prefix || ''),
+      String(actor || 'SYSTEM'),
+      runId,
+      CSA_DEV056__safeJson_(detailsObj || {})
+    ];
+
+    sh.appendRow(row);
+
+    return { ok: true, sheet: sheetName, run_id: runId };
+
+  } catch (e) {
+    try { CSA_LogError_(e, 'CSA_LogAudit_'); } catch (ignored2) {}
+    return { ok: false, error: (e && e.message) ? e.message : String(e) };
+  }
+}
+
+function CSA_AUDIT_LogIngestEvent_(payload) {
+  var p = payload || {};
+  var action = p.action || p.event || 'AUDIT_EVENT';
+  var status = p.status || p.result || 'SUCCESS';
+  var source = p.function_name || p.source || 'AUDIT_HOOK';
+
+  var details = {
+    run_id: p.run_id || '',
+    message: p.message || '',
+    payload: p
+  };
+
+  CSA_LogAudit_(action, status, source, details);
+}
+
+function CSA_DEV056_Migrate_AuditLog_Sheet_To_V2_(prefixOverride) {
+  var ctx = CSA_DEV056__getContext_();
+  if (prefixOverride) ctx.prefix = String(prefixOverride);
+
+  var ss = CSA_DEV056__openSpreadsheet_(ctx);
+  var sheetName = ctx.prefix + '_audit_log';
+  var sh = ss.getSheetByName(sheetName);
+
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+    CSA_DEV056__setHeader_(sh, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+    return { ok: true, sheet: sheetName, migratedRows: 0, note: 'created_new_sheet' };
+  }
+
+  var state = CSA_DEV056__getHeaderState_(sh);
+  if (state.isV2) return { ok: true, sheet: sheetName, migratedRows: 0, note: 'already_v2' };
+  if (!state.isLegacyV1) return { ok: false, sheet: sheetName, error: 'schema_unknown', summary: state.summary };
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  var values = (lastRow > 0 && lastCol > 0) ? sh.getRange(1, 1, lastRow, lastCol).getValues() : [];
+
+  var out = [];
+  out.push(CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS);
+
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r] || [];
+    out.push([
+      String(row[0] || Utilities.getUuid()),
+      row[1],
+      String(row[2] || ''),
+      'SUCCESS',
+      String(row[3] || ''),
+      'DEV',
+      ctx.prefix,
+      String(row[5] || 'SYSTEM'),
+      String(row[6] || ''),
+      CSA_DEV056__safeJson_({ details: row[4] })
+    ]);
+  }
+
+  sh.clearContents();
+  sh.getRange(1, 1, out.length, CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS.length).setValues(out);
+
+  return { ok: true, sheet: sheetName, migratedRows: Math.max(0, out.length - 1) };
+}
+
+/* ---- internal helpers ---- */
+
+function CSA_DEV056__getContext_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var env = String(props.CSA_ENV || 'DEV').trim();
+  var prefix = String(props.CSA_SHEET_PREFIX || 'test5').trim();
+  if (prefix && prefix.slice(-1) === '_') prefix = prefix.slice(0, -1);
+  return { env: env, prefix: prefix, spreadsheetId: String(props.CSA_SPREADSHEET_ID || '').trim() };
+}
+
+function CSA_DEV056__openSpreadsheet_(ctx) {
+  if (!ctx.spreadsheetId) throw new Error('CSA_SPREADSHEET_ID not set.');
+  return SpreadsheetApp.openById(ctx.spreadsheetId);
+}
+
+function CSA_DEV056__getActor_() {
+  try {
+    var email = Session.getActiveUser().getEmail();
+    return email || 'SYSTEM';
+  } catch (e) {
+    return 'SYSTEM';
+  }
+}
+
+function CSA_DEV056__safeJson_(obj) {
+  try { return JSON.stringify(obj); }
+  catch (e) { return JSON.stringify({ json_error: true, message: (e && e.message) ? e.message : String(e) }); }
+}
+
+function CSA_DEV056__setHeader_(sh, headers) {
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function CSA_DEV056__getHeaderState_(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol === 0) return { isV2: false, isLegacyV1: false, summary: 'empty_sheet' };
+
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0] || [];
+  var norm = header.map(function(v){ return String(v || '').trim(); });
+
+  return {
+    isV2: norm.join('|') === CSA_DEV056_AUDIT_SCHEMA_V2_HEADERS.join('|'),
+    isLegacyV1: norm.join('|') === CSA_DEV056_AUDIT_SCHEMA_V1_HEADERS.join('|'),
+    summary: 'cols=' + norm.length
+  };
+}
