@@ -1,0 +1,48 @@
+/**
+ * csa_probe_incidentFlow
+ * Diagnoses incident push behavior in CSA_GetIncidentData_
+ * DEV033 temp tool
+ */
+/*
+// Comment out per DEV0505 Hygiene 2026-02-20 9:15 PM MST -tim
+//
+//function csa_probe_incidentFlow() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('CSA_SPREADSHEET_ID');
+  const prefix = props.getProperty('CSA_SHEET_PREFIX') || 'incident';
+  const name = (prefix === 'incident') ? 'incident_data' : prefix + '_incident_data';
+
+  const ss = SpreadsheetApp.openById(id);
+  const sheet = ss.getSheetByName(name);
+  const values = sheet.getDataRange().getValues();
+  const headers = values.shift();
+  const idx = {};
+  headers.forEach((h, i) => { idx[h.trim()] = i; });
+
+  const qaConfig = {
+    A: false,
+    B: false,
+    C: false
+  };
+
+  let count = 0;
+  values.forEach(row => {
+    const incident = {
+      id_a: row[0],
+      qa_mock_set: row[idx["qa_mock_set"]] || ''
+    };
+
+    Logger.log('🟡 Incident: ' + JSON.stringify(incident));
+
+    if (qaConfig[incident.qa_mock_set] === true) {
+      Logger.log('🔴 Dropped: ' + incident.id_a);
+      return; // skip
+    }
+
+    Logger.log('🟢 Accepted: ' + incident.id_a);
+    count++;
+  });
+
+  Logger.log('✅ Total incidents accepted: ' + count);
+}
+*/
