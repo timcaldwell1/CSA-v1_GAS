@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 12px;
+        font-size: 13px;
+      }
+      .banner {
+        padding: 8px;
+        margin-bottom: 12px;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+      .banner.prod {
+        background-color: #D14A42;
+        color: #ffffff;
+      }
+      .panel {
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 10px;
+      }
+      .row {
+        margin-bottom: 6px;
+      }
+      .label {
+        font-weight: bold;
+      }
+      .value {
+        font-family: monospace;
+      }
+      .footer {
+        margin-top: 12px;
+        font-size: 11px;
+        color: #666;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="prodBanner" class="banner prod" style="display:none;">
+      ⚠️ PROD ENVIRONMENT — QA ACTIONS DISABLED
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <span class="label">CSA_ENV:</span>
+        <span id="env" class="value"></span>
+      </div>
+      <div class="row">
+        <span class="label">CSA_SHEET_PREFIX:</span>
+        <span id="sheetPrefix" class="value"></span>
+      </div>
+      <div class="row">
+        <span class="label">INSTALL_VERSION:</span>
+        <span id="installVersion" class="value"></span>
+      </div>
+      <div class="row">
+        <span class="label">MOCK_MODE:</span>
+        <span id="mockMode" class="value"></span>
+      </div>
+      <div class="row">
+        <span class="label">TIMESTAMP_TZ:</span>
+        <span id="tz" class="value"></span>
+      </div>
+    </div>
+
+    <div class="footer">
+      QA Sidebar — Phase A (Read-only)
+    </div>
+
+    <script>
+      google.script.run
+        .withSuccessHandler(renderContext)
+        .CSA_QA_Sidebar_GetContext_();
+
+      function renderContext(ctx) {
+        document.getElementById('env').textContent = ctx.env;
+        document.getElementById('sheetPrefix').textContent = ctx.sheet_prefix;
+        document.getElementById('installVersion').textContent = ctx.install_version;
+        document.getElementById('mockMode').textContent = String(ctx.mock_mode);
+        document.getElementById('tz').textContent = ctx.timestamp_tz;
+
+        if (ctx.warnings && ctx.warnings.indexOf('ENV_IS_PROD_BLOCK_ACTIONS') !== -1) {
+          document.getElementById('prodBanner').style.display = 'block';
+        }
+      }
+    </script>
+  </body>
+</html>
