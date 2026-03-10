@@ -1,0 +1,146 @@
+/**
+ * --------------------------------------------------------------------
+ * @file_name: CSA_UOD_v1_0_DEV049.gs
+ * @title: Unified Observational Dataset (UOD) — Read-Only Aggregator
+ * @product: CSA_v1.1 — Church Safety Alerts
+ * @version: v1.0.1-DEV049
+ * @binder_type: DEV Module (Read-Only; Non-Mutating)
+ * @current_phase: Observability Convergence (PoC)
+ *
+ * @thread_lineage:
+ *   DEV032 (error_log rehabilitation)
+ *   → DEV046 (RawPubDate handling contract)
+ *   → DEV047/048 (ingest + prefix guardrails)
+ *   → DEV049 (UOD convergence layer)
+ *
+ * @create_date: 2026-02-17
+ * @last_updated: 2026-02-18 09:55 MST
+ * @authors: DEV049
+ * --------------------------------------------------------------------
+ *
+ * PURPOSE
+ *   Aggregates observational data across:
+ *     - incident_data
+ *     - discarded_events
+ *     - error_log
+ *     - audit_log
+ *
+ *   Non-mutating. Read-only.
+ *   Prefix-aware (normalized internally).
+ * --------------------------------------------------------------------
+ */
+
+
+/* ============================================================
+   PUBLIC ENTRYPOINT
+============================================================ */
+
+function CSA_UOD_Query_(options) {
+
+  options = options || {};
+
+  var limit = (typeof options.limit === 'number') ? options.limit : 1000;
+  if (limit > 1000) limit = 1000;
+
+  var since = options.since ? new Date(options.since) : null;
+
+  var rows = [];
+
+  rows = rows
+    .concat(_CSA_UOD_FromSheet_('incident_data', 'INCIDENT', since))
+    .concat(_CSA_UOD_FromSheet_('discarded_events', 'DISCARD', since))
+    .concat(_CSA_UOD_FromSheet_('error_log', 'ERROR', since))
+    .concat(_CSA_UOD_FromSheet_('audit_log', 'AUDIT', since));
+
+  // Sort DESC by timestamp
+  rows.sort(function(a, b) {
+    return new Date(b.timestamp) - new Date(a.timestamp);
+  });
+
+  if (limit) {
+    rows = rows.slice(0, limit);
+  }
+
+  return rows;
+}
+
+
+/* ============================================================
+   INTERNAL: SHEET AGGREGATION
+============================================================ */
+
+function _CSA_UOD_FromSheet_(baseName, sourceType, since) {
+
+  var sheetName = _CSA_UOD_SheetName_(baseName);
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) return [];
+
+  var values = sheet.getDataRange().getValues();
+  if (!values || values.length < 2) return [];
+
+  var headers = values[0];
+  var dataRows = values.slice(1);
+
+  var out = [];
+
+  for (var i = 0; i < dataRows.length; i++) {
+
+    var row = dataRows[i];
+    var obj = {};
+
+    for (var j = 0; j < headers.length; j++) {
+      obj[String(headers[j]).trim()] = row[j];
+    }
+
+    var timestamp = _CSA_UOD_ExtractTimestamp_(obj);
+    if (!timestamp) continue;
+
+    if (since && new Date(timestamp) < since) continue;
+
+    out.push({
+      source_type: sourceType,
+      timestamp: timestamp,
+      incident_id: obj.incident_id || null,
+      campus: obj.campus || null,
+      run_id: obj.run_id || null,
+      payload: obj
+    });
+  }
+
+  return out;
+}
+
+
+/* ============================================================
+   INTERNAL: PREFIX NORMALIZATION (Option A)
+============================================================ */
+
+function _CSA_UOD_NormalizedPrefix_() {
+  var p = PropertiesService.getScriptProperties()
+    .getProperty('CSA_SHEET_PREFIX') || '';
+
+  if (!p) return '';
+
+  return p.endsWith('_') ? p : (p + '_');
+}
+
+function _CSA_UOD_SheetName_(baseName) {
+  return _CSA_UOD_NormalizedPrefix_() + baseName;
+}
+
+
+/* ============================================================
+   INTERNAL: TIMESTAMP EXTRACTION
+============================================================ */
+
+function _CSA_UOD_ExtractTimestamp_(obj) {
+
+  // Order of preference
+  if (obj.timestamp) return obj.timestamp;
+  if (obj.event_ts_iso) return obj.event_ts_iso;
+  if (obj.RawPubDate) return obj.RawPubDate;
+
+  return null;
+}
