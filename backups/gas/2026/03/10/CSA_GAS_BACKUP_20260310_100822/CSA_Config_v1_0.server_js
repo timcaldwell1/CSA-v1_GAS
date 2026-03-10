@@ -1,0 +1,61 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_Config_v1_0.gs
+ * title: DEV061 Header Normalization Surface
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: ACTIVE — Header Governance Normalized
+ *
+ * thread_lineage:
+ * DEV060 → DEV061
+ *
+ * last_updated: 2026-03-08 MST
+ *
+ * execution_role:
+ * Script surface within CSA runtime. Header normalized under DEV061
+ * header completeness maintenance pass.
+ *
+ * governance_classification:
+ * H0 — Runtime infrastructure or diagnostic surface
+ *
+ * mutation_surface:
+ * UNKNOWN — determined by underlying functions
+ *
+ * description:
+ * Canonical governed header applied during DEV061 header completeness
+ * maintenance. No runtime logic modifications were made.
+ * --------------------------------------------------------------------
+ */
+
+function CSA_GetConfig_() {
+  return {
+    CSA_PRODUCT_NAME: getRequiredProperty_('CSA_PRODUCT_NAME'),
+    CSA_ENV: getRequiredProperty_('CSA_ENV'),
+    CSA_MOCK_MODE: getRequiredProperty_('CSA_MOCK_MODE'),
+    CSA_CAMPUS_NAME: getRequiredProperty_('CSA_CAMPUS_NAME'),
+    CSA_SPREADSHEET_ID: getRequiredProperty_('CSA_SPREADSHEET_ID')
+  };
+}
+
+/**
+ * Retrieves a required Script Property from ScriptProperties.
+ *
+ * @param {string} key
+ * @returns {string} value
+ * @throws {Error} FATAL if property is missing or empty
+ */
+function getRequiredProperty_(key) {
+  if (!key) {
+    throw new Error('FATAL: getRequiredProperty_ called without key');
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  const value = props.getProperty(key);
+
+  if (value === null || value === undefined || value === '') {
+    throw new Error('Missing required Script Property: ' + key);
+  }
+
+  return value;
+}
