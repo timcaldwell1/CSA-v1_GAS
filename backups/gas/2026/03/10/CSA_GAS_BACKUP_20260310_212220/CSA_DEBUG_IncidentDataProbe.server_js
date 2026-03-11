@@ -1,0 +1,113 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_DEBUG_IncidentDataProbe.gs
+ * title: DEV061 Header Normalization Surface
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: ACTIVE — Header Governance Normalized
+ *
+ * thread_lineage:
+ * DEV060 → DEV061
+ *
+ * last_updated: 2026-03-08 MST
+ *
+ * execution_role:
+ * Script surface within CSA runtime. Header normalized under DEV061
+ * header completeness maintenance pass.
+ *
+ * governance_classification:
+ * H0 — Runtime infrastructure or diagnostic surface
+ *
+ * mutation_surface:
+ * UNKNOWN — determined by underlying functions
+ *
+ * description:
+ * Canonical governed header applied during DEV061 header completeness
+ * maintenance. No runtime logic modifications were made.
+ * --------------------------------------------------------------------
+ */
+
+
+function CSA_DEBUG_IncidentDataProbe() {
+  const log = Logger.log;
+
+  log('===== CSA DEBUG: Incident Data Probe START =====');
+
+  // ---- Script Properties ----
+  const props = PropertiesService.getScriptProperties().getProperties();
+
+  const PREFIX = props.CSA_SHEET_PREFIX || '(unset)';
+  const SPREADSHEET_ID = props.CSA_SPREADSHEET_ID;
+  const CAMPUS = props.CSA_CAMPUS_NAME || '(unset)';
+
+  log('CSA_SHEET_PREFIX = ' + PREFIX);
+  log('CSA_SPREADSHEET_ID = ' + SPREADSHEET_ID);
+  log('CSA_CAMPUS_NAME = ' + CAMPUS);
+
+  // ---- Resolve sheet name exactly as DEV032 ----
+  const INCIDENT_SHEET_NAME =
+    (!props.CSA_SHEET_PREFIX || props.CSA_SHEET_PREFIX === 'incident')
+      ? 'incident_data'
+      : props.CSA_SHEET_PREFIX + '_incident_data';
+
+  log('Resolved INCIDENT_SHEET_NAME = "' + INCIDENT_SHEET_NAME + '"');
+
+  // ---- Open spreadsheet explicitly (NOT getActiveSpreadsheet) ----
+  let ss;
+  try {
+    ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    log('PASS: Spreadsheet opened by ID');
+  } catch (e) {
+    log('❌ FAIL: Cannot open spreadsheet by ID');
+    log(e.message);
+    log('===== CSA DEBUG ABORT =====');
+    return;
+  }
+
+  // ---- Verify sheet existence ----
+  const sheet = ss.getSheetByName(INCIDENT_SHEET_NAME);
+  if (!sheet) {
+    log('❌ FAIL: Sheet NOT FOUND');
+    log('Available sheets:');
+    ss.getSheets().forEach(s => log(' - "' + s.getName() + '"'));
+    log('===== CSA DEBUG ABORT =====');
+    return;
+  }
+
+  log('PASS: Sheet found');
+
+  // ---- Read data ----
+  const values = sheet.getDataRange().getValues();
+  const rowCount = values.length;
+  const colCount = values[0]?.length || 0;
+
+  log('Row count (including header) = ' + rowCount);
+  log('Column count = ' + colCount);
+
+  if (rowCount <= 1) {
+    log('INFO: Sheet has header only — zero incidents is CORRECT behavior');
+    log('===== CSA DEBUG COMPLETE =====');
+    return;
+  }
+
+  // ---- Header inspection ----
+  const headers = values[0].map(h => String(h).trim());
+  log('Headers detected: ' + JSON.stringify(headers));
+
+  // ---- Minimal row sanity (first data row) ----
+  const sampleRow = values[1];
+  log('Sample data row (row 2): ' + JSON.stringify(sampleRow));
+
+  // ---- Simulate DEV032-style filtering (non-destructive) ----
+  let nonEmptyRows = 0;
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const hasAnyValue = row.some(v => v !== '' && v !== null);
+    if (hasAnyValue) nonEmptyRows++;
+  }
+
+  log('Non-empty data rows = ' + nonEmptyRows);
+
+  log('===== CSA DEBUG: Incident Data Probe END =====');
+}
