@@ -1,0 +1,202 @@
+/**
+ * CSA_DEV064_Debug_Cursor_Trace_v1_0.gs
+ * Purpose:
+ * - Trace what DEV053 ingest is reading/writing for cursor + batch properties
+ * - Help isolate where properties are being reset to 1000 / 1001
+ * - Non-destructive except where explicitly noted
+ *
+ * Usage:
+ * 1) Paste this into a new GAS file
+ * 2) Save
+ * 3) In Script Properties, manually set:
+ *      CSA_DEV053_CURSOR_test5 = 2
+ *      CSA_DEV053_BATCH_SIZE   = 2
+ * 4) Run: CSA_DEV064_Debug_DEV053_PropertyTrace_()
+ * 5) Open Logs and copy the output
+ */
+
+/** ---------------------------
+ * Small helpers
+ * ------------------------- */
+
+function CSA_DEV064_Debug_GetScriptProps_() {
+  return PropertiesService.getScriptProperties();
+}
+
+function CSA_DEV064_Debug_GetNowMST_() {
+  return Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST';
+}
+
+function CSA_DEV064_Debug_Log_(label, value) {
+  Logger.log(label + ': ' + value);
+}
+
+function CSA_DEV064_Debug_ReadPropertySnapshot_() {
+  var props = CSA_DEV064_Debug_GetScriptProps_();
+
+  var snapshot = {
+    ts_mst: CSA_DEV064_Debug_GetNowMST_(),
+    CSA_ENV: props.getProperty('CSA_ENV'),
+    CSA_SHEET_PREFIX: props.getProperty('CSA_SHEET_PREFIX'),
+    CSA_INGEST_PREFIX: props.getProperty('CSA_INGEST_PREFIX'),
+    CSA_TEMPLATE_PREFIX: props.getProperty('CSA_TEMPLATE_PREFIX'),
+    CSA_DEV053_BATCH_SIZE: props.getProperty('CSA_DEV053_BATCH_SIZE'),
+    CSA_DEV053_CURSOR_test5: props.getProperty('CSA_DEV053_CURSOR_test5'),
+    CSA_DEV053_CURSOR_test5_: props.getProperty('CSA_DEV053_CURSOR_test5_'),
+    CSA_DEV053_CURSOR_test6: props.getProperty('CSA_DEV053_CURSOR_test6')
+  };
+
+  return snapshot;
+}
+
+function CSA_DEV064_Debug_LogSnapshot_(title) {
+  var snap = CSA_DEV064_Debug_ReadPropertySnapshot_();
+  Logger.log('==================== ' + title + ' ====================');
+  Object.keys(snap).forEach(function(key) {
+    Logger.log(key + ' = ' + snap[key]);
+  });
+  Logger.log('====================================================');
+}
+
+/** ---------------------------
+ * Queue inspection
+ * ------------------------- */
+
+function CSA_DEV064_Debug_InspectTest5Queue_() {
+  var props = CSA_DEV064_Debug_GetScriptProps_();
+  var ssId = props.getProperty('CSA_SPREADSHEET_ID');
+  var ss = SpreadsheetApp.openById(ssId);
+  var sh = ss.getSheetByName('test5_poc_ingest_queue');
+
+  if (!sh) {
+    Logger.log('ERROR: Sheet not found: test5_poc_ingest_queue');
+    return;
+  }
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+
+  Logger.log('--- QUEUE INSPECTION ---');
+  Logger.log('Sheet: test5_poc_ingest_queue');
+  Logger.log('lastRow=' + lastRow);
+  Logger.log('lastCol=' + lastCol);
+
+  if (lastRow >= 2) {
+    var sampleEnd = Math.min(lastRow, 10);
+    var values = sh.getRange(1, 1, sampleEnd, Math.min(lastCol, 5)).getDisplayValues();
+    for (var i = 0; i < values.length; i++) {
+      Logger.log('Row ' + (i + 1) + ': ' + JSON.stringify(values[i]));
+    }
+  } else {
+    Logger.log('Queue has no data rows.');
+  }
+}
+
+/** ---------------------------
+ * Property setter helpers
+ * ------------------------- */
+
+function CSA_DEV064_Debug_SetTest5CursorAndBatchTo2_() {
+  var props = CSA_DEV064_Debug_GetScriptProps_();
+
+  props.setProperty('CSA_DEV053_CURSOR_test5', '2');
+  props.setProperty('CSA_DEV053_BATCH_SIZE', '2');
+
+  Logger.log('Set CSA_DEV053_CURSOR_test5 = 2');
+  Logger.log('Set CSA_DEV053_BATCH_SIZE = 2');
+
+  // Read back immediately to verify persistence.
+  Logger.log('Readback cursor=' + props.getProperty('CSA_DEV053_CURSOR_test5'));
+  Logger.log('Readback batch=' + props.getProperty('CSA_DEV053_BATCH_SIZE'));
+}
+
+function CSA_DEV064_Debug_ClearAltCursorKey_IfPresent_() {
+  var props = CSA_DEV064_Debug_GetScriptProps_();
+  var alt = props.getProperty('CSA_DEV053_CURSOR_test5_');
+
+  if (alt !== null) {
+    props.deleteProperty('CSA_DEV053_CURSOR_test5_');
+    Logger.log('Deleted alternate key: CSA_DEV053_CURSOR_test5_ (previous value=' + alt + ')');
+  } else {
+    Logger.log('Alternate key not present: CSA_DEV053_CURSOR_test5_');
+  }
+}
+
+/** ---------------------------
+ * Main trace runner
+ * ------------------------- */
+
+function CSA_DEV064_Debug_DEV053_PropertyTrace_() {
+  Logger.log('');
+  Logger.log('########## DEV064 DEBUG TRACE START ##########');
+  Logger.log('Timestamp: ' + CSA_DEV064_Debug_GetNowMST_());
+
+  CSA_DEV064_Debug_LogSnapshot_('BEFORE MANUAL RESET');
+
+  // Force known values.
+  CSA_DEV064_Debug_SetTest5CursorAndBatchTo2_();
+
+  CSA_DEV064_Debug_LogSnapshot_('AFTER MANUAL RESET');
+  CSA_DEV064_Debug_InspectTest5Queue_();
+
+  // Optional: remove possible alternate cursor key.
+  CSA_DEV064_Debug_ClearAltCursorKey_IfPresent_();
+
+  CSA_DEV064_Debug_LogSnapshot_('AFTER ALT-KEY CLEANUP');
+
+  // Try dry run wrapper first if it exists.
+  Logger.log('--- ATTEMPTING DRY RUN WRAPPER ---');
+  try {
+    if (typeof RUN_DEV053_Ingest_Batch_DryRun === 'function') {
+      var dryResult = RUN_DEV053_Ingest_Batch_DryRun();
+      Logger.log('RUN_DEV053_Ingest_Batch_DryRun() result=' + JSON.stringify(dryResult));
+    } else {
+      Logger.log('Dry run wrapper not found: RUN_DEV053_Ingest_Batch_DryRun');
+    }
+  } catch (err1) {
+    Logger.log('Dry run wrapper ERROR: ' + err1);
+  }
+
+  CSA_DEV064_Debug_LogSnapshot_('AFTER DRY RUN');
+
+  // Reset again to known values before commit.
+  CSA_DEV064_Debug_SetTest5CursorAndBatchTo2_();
+  CSA_DEV064_Debug_LogSnapshot_('AFTER SECOND RESET PRE-COMMIT');
+
+  Logger.log('--- ATTEMPTING COMMIT WRAPPER ---');
+  try {
+    if (typeof RUN_DEV053_Ingest_Batch_Commit === 'function') {
+      var commitResult = RUN_DEV053_Ingest_Batch_Commit();
+      Logger.log('RUN_DEV053_Ingest_Batch_Commit() result=' + JSON.stringify(commitResult));
+    } else {
+      Logger.log('Commit wrapper not found: RUN_DEV053_Ingest_Batch_Commit');
+    }
+  } catch (err2) {
+    Logger.log('Commit wrapper ERROR: ' + err2);
+  }
+
+  CSA_DEV064_Debug_LogSnapshot_('AFTER COMMIT');
+
+  Logger.log('########## DEV064 DEBUG TRACE END ##########');
+  Logger.log('');
+}
+
+/** ---------------------------
+ * Optional: narrow test that does NOT run ingest
+ * Use this first if you want to confirm property persistence only.
+ * ------------------------- */
+function CSA_DEV064_Debug_PropertyPersistenceOnly_() {
+  Logger.log('');
+  Logger.log('########## PROPERTY PERSISTENCE TEST START ##########');
+  Logger.log('Timestamp: ' + CSA_DEV064_Debug_GetNowMST());
+
+  CSA_DEV064_Debug_LogSnapshot_('INITIAL');
+  CSA_DEV064_Debug_SetTest5CursorAndBatchTo2_();
+  Utilities.sleep(1500);
+  CSA_DEV064_Debug_LogSnapshot_('AFTER 1.5s');
+  Utilities.sleep(1500);
+  CSA_DEV064_Debug_LogSnapshot_('AFTER 3.0s');
+
+  Logger.log('########## PROPERTY PERSISTENCE TEST END ##########');
+  Logger.log('');
+}
