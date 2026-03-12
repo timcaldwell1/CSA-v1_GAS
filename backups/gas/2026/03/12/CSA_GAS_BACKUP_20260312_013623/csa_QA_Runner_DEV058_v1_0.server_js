@@ -1,0 +1,571 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: csa_QA_Runner_DEV058_v1_0.gs
+ * title: DEV058 QA Runner
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: ACTIVE — QA Execution Surface
+ *
+ * thread_lineage:
+ * DEV058
+ *
+ * last_updated: 2026-03-08 MST
+ *
+ * execution_role:
+ * Controlled QA execution harness used to run verification and
+ * validation routines across CSA runtime components.
+ *
+ * governance_classification:
+ * H0 — QA infrastructure
+ *
+ * mutation_surface:
+ * NONE — orchestration surface for test routines
+ *
+ * description:
+ * Canonical governed header applied during DEV061 header
+ * completeness maintenance pass. No runtime logic changes.
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * ============================================================================
+ * File Name: csa_QA_Runner_DEV058_v1_0.gs
+ * Title: DEV058 — QA Runner (test5_* Reset + Verify + PhaseA Wiring)
+ * Product: CSA_v1.0 — Church Safety Alerts
+ * Artifact Namespace: CSA_v1.1
+ * Version: v1_0
+ * Status: WORKING — TEMP (hygiene candidate; lowercase csa_ prefix)
+ * Thread Lineage: DEV032 → DEV048 → DEV050 → DEV055 → DEV056 → DEV057 → DEV058
+ * QA Evidence Anchor (MST): 2026-03-03 09:21 MST (start-of-QA evidence captured separately)
+ * Last Updated (MST): 2026-03-03
+ * Authors: Tim Caldwell → DEV017-Author (G)
+ *
+ * Purpose:
+ * - Provide a low-blast-radius QA runner for DEV058 without modifying ToolRunner.
+ * - Reset + verify the test5_* sheet set to a known-good scaffold based on the
+ *   provided DEV058 XLSX template (headers + protected seed data).
+ * - Wire Phase A calls to existing DEV053/DEV041 functions when present.
+ *
+ * Reset Rules (per DEV058):
+ * - Reset (clear + rebuild) all required test5_* sheets EXCEPT:
+ *   - test5_keyword_defs (DO NOT clear content)
+ *   - test5_safety_zones (DO NOT clear content)
+ * - If either protected sheet is missing (or empty and seeding is enabled),
+ *   create/seed from the XLSX template baseline.
+ *
+ * Notes on "formulas":
+ * - The provided XLSX template is values-only (no embedded spreadsheet formulas).
+ * - The canonical raw→queue mapping is implemented in DEV053 code
+ *   (CSA_DEV053_CoP_BuildQueueFromRaw_). This runner wires to that function when available.
+ * ============================================================================
+ */
+
+
+/* ============================
+   TEMPLATE (from DEV058 XLSX)
+   ============================ */
+
+var CSA_DEV058_TEST5_TEMPLATE = {
+  requiredSheets: [
+    'test5_cop_calls_raw',
+    'test5_poc_ingest_queue',
+    'test5_incident_data',
+    'test5_discarded_events',
+    'test5_audit_log',
+    'test5_error_log',
+    'test5_keyword_defs',     // protected
+    'test5_safety_zones'      // protected
+  ],
+
+  protectedSheets: {
+    test5_keyword_defs: true,
+    test5_safety_zones: true
+  },
+
+  headers: {
+    test5_cop_calls_raw: [
+      '_id','INCIDENT_NUM','DISP_CODE','DISPOSITION','FINAL_RADIO_CODE','FINAL_CALL_TYPE','CALL_RECEIVED','HUNDREDBLOCKADDR','GRID'
+    ],
+    test5_poc_ingest_queue: [
+      'incident_id','incident_type','description','location','RawPubDate'
+    ],
+    test5_incident_data: [
+      'incident_id','incident_type','description','matched_keywords','risk_level','risk_label','campus','timestamp','RawPubDate','risk_model_version'
+    ],
+    test5_discarded_events: [
+      'incident_id','stage','reason_code','trigger','campus','timestamp'
+    ],
+    test5_audit_log: [
+      'id','timestamp_mst','action','status','source','env','prefix','user','run_id','details_json'
+    ],
+    test5_error_log: [
+      'id','timestamp','error','incident_id','details','error_details','campus_attempted','original_ts','severity','env','source','function_name',
+      'message','event_id','event_ts_iso','domain','stage','outcome','request_id'
+    ],
+    test5_keyword_defs: [
+      'keyword','taxonomy_class','base_weight','active','campus','notes'
+    ],
+    test5_safety_zones: [
+      'zone_name','center_lat','center_lon','radius','active','last_timestamp','backup_folder_id'
+    ]
+  },
+
+  seed: {
+    // Protected seed baselines (data rows only; header is in headers[])
+    test5_keyword_defs: [
+      ['shooting','SIGNAL',5,'Y','*',null],
+      ['shot','SIGNAL',5,'Y','*',null],
+      ['gunfire','SIGNAL',5,'Y','*',null],
+      ['bomb threat','SIGNAL',5,'Y','*',null],
+      ['explosive','SIGNAL',5,'Y','*',null],
+      ['arson','SIGNAL',5,'Y','*',null],
+      ['firebomb','SIGNAL',5,'Y','*',null],
+      ['assault','SIGNAL',5,'Y','*',null],
+      ['stabbed','SIGNAL',5,'Y','*',null],
+      ['stabbing','SIGNAL',5,'Y','*',null],
+      ['killed','SIGNAL',5,'Y','*',null],
+      ['homicide','SIGNAL',5,'Y','*',null],
+      ['vehicle attack','SIGNAL',5,'Y','*',null],
+      ['body found','SIGNAL',5,'Y','*',null],
+      ['robbery','SIGNAL',5,'Y','*',null],
+      ['armed robbery','SIGNAL',5,'Y','*',null],
+      ['drill','NEGATION',0,'Y','*',null],
+      ['training','NEGATION',0,'Y','*',null],
+      ['exercise','NEGATION',0,'Y','*',null],
+      ['hoax','NEGATION',0,'Y','*',null],
+      ['false alarm','NEGATION',0,'Y','*',null],
+      ['shots fired','SIGNAL',5,'Y','*','DEV053: CoP dominant phrase support (no synonym mapping to shooting)'],
+      ['Dead body','SIGNAL',5,'Y','*','Add by Tim']
+    ],
+
+    test5_safety_zones: [
+      ['Laveen',33.37626528,-112.1451959,1609,true,null,'1ob4ft_tGTYgvFbGuXIzFezvxgSXrPsVd']
+    ],
+
+    // Optional: sample queue rows from XLSX (not used by default; see Reset options)
+    test5_poc_ingest_queue_samples: [
+      ['26000081911','SUBJECT WITH A GUN','417G | SUBJECT WITH A GUN | I | INTERACTION | GRID=AH05','98XX W LOWER BUCKEYE RD, Phoenix, AZ','01/18/2026 2:23:12 PM'],
+      ['26000082577','HOMICIDE','451 | HOMICIDE | R | DEPARTMENTAL REPORT | GRID=DH22','29XX W WOODRIDGE DR, Phoenix, AZ','01/18/2026 5:14:01 PM']
+    ]
+  }
+};
+
+
+/* ============================
+   PUBLIC ENTRYPOINTS (RUNNABLE)
+   ============================ */
+
+/**
+ * Preflight: confirms Script Properties posture is DEV + test5.
+ * Also attempts Stable Checkpoint verify if DEV041 verifier exists.
+ */
+function csa_QA_DEV058_Preflight_Test5() {
+  var out = {
+    ok: true,
+    checks: [],
+    props: csa_QA_DEV058__getKeyProps_()
+  };
+
+  var env = String(out.props.CSA_ENV || '').trim();
+  var sheetPrefix = csa_QA_DEV058__normPrefix_(out.props.CSA_SHEET_PREFIX);
+  var ingestPrefix = csa_QA_DEV058__normPrefix_(out.props.CSA_INGEST_PREFIX);
+
+  var okProps = (env === 'DEV' && sheetPrefix === 'test5' && ingestPrefix === 'test5');
+  out.checks.push({ check: 'ScriptProperties', ok: okProps, CSA_ENV: env, CSA_SHEET_PREFIX: out.props.CSA_SHEET_PREFIX, CSA_INGEST_PREFIX: out.props.CSA_INGEST_PREFIX });
+  if (!okProps) out.ok = false;
+
+  // Optional: Stable checkpoint verifier (DEV041)
+  if (typeof CSA_DEV041_VerifyStableCheckpoint_ === 'function') {
+    try {
+      var r = CSA_DEV041_VerifyStableCheckpoint_();
+      out.checks.push({ check: 'StableCheckpointVerifier', ok: true, result: r });
+    } catch (e) {
+      out.ok = false;
+      out.checks.push({ check: 'StableCheckpointVerifier', ok: false, error: csa_QA_DEV058__err_(e) });
+    }
+  } else {
+    out.checks.push({ check: 'StableCheckpointVerifier', ok: true, note: 'Verifier not present in this project (skipped)' });
+  }
+
+  // Required sheets exist (light check)
+  var ss = csa_QA_DEV058__openSpreadsheet_();
+  var missing = [];
+  for (var i = 0; i < CSA_DEV058_TEST5_TEMPLATE.requiredSheets.length; i++) {
+    var name = CSA_DEV058_TEST5_TEMPLATE.requiredSheets[i];
+    if (!ss.getSheetByName(name)) missing.push(name);
+  }
+  var okSheets = (missing.length === 0);
+  out.checks.push({ check: 'RequiredSheetsPresent', ok: okSheets, missing: missing });
+  if (!okSheets) out.ok = false;
+
+  return out;
+}
+
+
+/**
+ * Reset test5_* campus:
+ * - Rebuilds non-protected sheets (clear + headers; plus optional queue samples)
+ * - Preserves keyword_defs and safety_zones (no clear)
+ * - Seeds protected sheets if missing OR (optional) empty
+ *
+ * Options:
+ * {
+ *   seed_protected_if_empty: true|false (default true),
+ *   seed_queue_samples: true|false (default false),
+ *   throw_on_protected_header_mismatch: true|false (default true)
+ * }
+ */
+function csa_QA_DEV058_Reset_Test5_Campus(options) {
+  options = options || {};
+  var seedProtectedIfEmpty = (options.seed_protected_if_empty !== false);
+  var seedQueueSamples = (options.seed_queue_samples === true);
+  var throwOnProtectedHeaderMismatch = (options.throw_on_protected_header_mismatch !== false);
+
+  var ss = csa_QA_DEV058__openSpreadsheet_();
+  var report = {
+    ok: true,
+    created: [],
+    cleared: [],
+    seeded: [],
+    preserved: [],
+    warnings: [],
+    errors: []
+  };
+
+  // Ensure all required sheets exist
+  for (var i = 0; i < CSA_DEV058_TEST5_TEMPLATE.requiredSheets.length; i++) {
+    var name = CSA_DEV058_TEST5_TEMPLATE.requiredSheets[i];
+    var sh = ss.getSheetByName(name);
+    if (!sh) {
+      sh = ss.insertSheet(name);
+      report.created.push(name);
+    }
+  }
+
+  // Apply reset rules per sheet
+  for (var j = 0; j < CSA_DEV058_TEST5_TEMPLATE.requiredSheets.length; j++) {
+    var sName = CSA_DEV058_TEST5_TEMPLATE.requiredSheets[j];
+    var sheet = ss.getSheetByName(sName);
+    if (!sheet) continue; // safety
+
+    var isProtected = !!CSA_DEV058_TEST5_TEMPLATE.protectedSheets[sName];
+    var hdr = CSA_DEV058_TEST5_TEMPLATE.headers[sName];
+
+    if (!hdr || hdr.length === 0) {
+      report.warnings.push('No template header defined for ' + sName + ' (skipped)');
+      continue;
+    }
+
+    if (isProtected) {
+      // DO NOT CLEAR CONTENT
+      // Verify header matches
+      var okHdr = csa_QA_DEV058__ensureHeader_(sheet, hdr, { mode: 'VERIFY_ONLY' });
+      if (!okHdr.ok) {
+        report.ok = false;
+        report.errors.push({ sheet: sName, error: okHdr });
+        if (throwOnProtectedHeaderMismatch) {
+          throw new Error('Reset aborted: protected sheet header mismatch: ' + sName);
+        }
+      }
+      report.preserved.push(sName);
+
+      // Seed if missing/empty (optional)
+      if (seedProtectedIfEmpty) {
+        var lastRow = sheet.getLastRow();
+        if (lastRow <= 1) {
+          var seedRows = CSA_DEV058_TEST5_TEMPLATE.seed[sName] || [];
+          if (seedRows.length > 0) {
+            sheet.getRange(2, 1, seedRows.length, hdr.length).setValues(seedRows);
+            report.seeded.push(sName + ' (seeded ' + seedRows.length + ' rows)');
+          }
+        }
+      }
+      continue;
+    }
+
+    // Non-protected: clear + set header
+    csa_QA_DEV058__clearBelowHeader_(sheet);
+    csa_QA_DEV058__setHeader_(sheet, hdr);
+    report.cleared.push(sName);
+
+    // Special handling: queue RawPubDate column should be TEXT
+    if (sName === 'test5_poc_ingest_queue') {
+      // Force column 5 to TEXT for a reasonable range (prevents unwanted date normalization)
+      sheet.getRange(2, 5, Math.max(1, sheet.getMaxRows() - 1), 1).setNumberFormat('@');
+
+      // Optional: seed sample queue rows from template
+      if (seedQueueSamples) {
+        var qRows = CSA_DEV058_TEST5_TEMPLATE.seed.test5_poc_ingest_queue_samples || [];
+        if (qRows.length > 0) {
+          sheet.getRange(2, 1, qRows.length, hdr.length).setValues(qRows);
+          report.seeded.push(sName + ' (seeded ' + qRows.length + ' sample rows)');
+        }
+      }
+    }
+  }
+
+  return report;
+}
+
+
+/**
+ * Verify test5_* campus against the XLSX template:
+ * - sheet existence
+ * - exact header match for all required sheets
+ * - protected sheets: verifies header; does not evaluate content beyond "has rows"
+ */
+function csa_QA_DEV058_Verify_Test5_Campus(options) {
+  options = options || {};
+  var throwOnFail = (options.throw_on_fail === true);
+
+  var ss = csa_QA_DEV058__openSpreadsheet_();
+  var result = {
+    ok: true,
+    missingSheets: [],
+    headerMismatches: [],
+    protectedEmpty: [],
+    details: {}
+  };
+
+  for (var i = 0; i < CSA_DEV058_TEST5_TEMPLATE.requiredSheets.length; i++) {
+    var name = CSA_DEV058_TEST5_TEMPLATE.requiredSheets[i];
+    var sh = ss.getSheetByName(name);
+    if (!sh) {
+      result.ok = false;
+      result.missingSheets.push(name);
+      continue;
+    }
+
+    var wantHdr = CSA_DEV058_TEST5_TEMPLATE.headers[name] || [];
+    var gotHdr = csa_QA_DEV058__readHeader_(sh, wantHdr.length);
+    var okHdr = csa_QA_DEV058__arrEq_(wantHdr, gotHdr);
+
+    if (!okHdr) {
+      result.ok = false;
+      result.headerMismatches.push({ sheet: name, want: wantHdr, got: gotHdr });
+    }
+
+    if (CSA_DEV058_TEST5_TEMPLATE.protectedSheets[name]) {
+      if (sh.getLastRow() <= 1) result.protectedEmpty.push(name);
+    }
+
+    result.details[name] = {
+      lastRow: sh.getLastRow(),
+      lastCol: sh.getLastColumn(),
+      headerOk: okHdr
+    };
+  }
+
+  if (!result.ok && throwOnFail) {
+    throw new Error('Verify FAIL: missingSheets=' + result.missingSheets.length + ' headerMismatches=' + result.headerMismatches.length);
+  }
+
+  return result;
+}
+
+
+/**
+ * Snapshot row counts (excluding header) for the primary test5_* surfaces.
+ */
+function csa_QA_DEV058_Snapshot_Test5() {
+  var ss = csa_QA_DEV058__openSpreadsheet_();
+  var names = [
+    'test5_cop_calls_raw',
+    'test5_poc_ingest_queue',
+    'test5_incident_data',
+    'test5_discarded_events',
+    'test5_audit_log',
+    'test5_error_log'
+  ];
+
+  var out = { mst_iso: csa_QA_DEV058__nowMstIso_(), counts: {} };
+  for (var i = 0; i < names.length; i++) {
+    var sh = ss.getSheetByName(names[i]);
+    out.counts[names[i]] = sh ? Math.max(0, sh.getLastRow() - 1) : null;
+  }
+  return out;
+}
+
+
+/**
+ * Phase A orchestration (test5):
+ * - Optional: Ensure test5 campus scaffold is valid (verify)
+ * - Optional: Build queue from raw (DEV053) if available
+ * - Freeze queue (DEV053) if available (values-only snapshot)
+ * - Run ingest commit (DEV053) if available
+ *
+ * Options:
+ * {
+ *   verify_first: true|false (default true),
+ *   build_queue_from_raw: true|false (default true),
+ *   ensure_shots_fired_keyword: true|false (default true)
+ * }
+ */
+function csa_QA_DEV058_Run_PhaseA_Test5(options) {
+  options = options || {};
+  var verifyFirst = (options.verify_first !== false);
+  var buildQueueFromRaw = (options.build_queue_from_raw !== false);
+  var ensureShotsFiredKeyword = (options.ensure_shots_fired_keyword !== false);
+
+  // Preflight posture
+  var pre = csa_QA_DEV058_Preflight_Test5();
+  if (!pre.ok) {
+    return { ok: false, phase: 'preflight', preflight: pre };
+  }
+
+  if (verifyFirst) {
+    var v = csa_QA_DEV058_Verify_Test5_Campus({ throw_on_fail: false });
+    if (!v.ok) return { ok: false, phase: 'verify', verify: v };
+  }
+
+  // DEV053 optional helper: ensure keyword exists
+  if (ensureShotsFiredKeyword && typeof CSA_DEV053_EnsureShotsFiredKeyword_ === 'function') {
+    try {
+      CSA_DEV053_EnsureShotsFiredKeyword_('test5');
+    } catch (e0) {
+      // PRACTICAL: do not hard-fail Phase A on this helper
+      Logger.log('[DEV058][WARN] EnsureShotsFiredKeyword failed: %s', e0);
+    }
+  }
+
+  // Build queue from raw (preferred contract path)
+  if (buildQueueFromRaw) {
+    if (typeof CSA_DEV053_CoP_BuildQueueFromRaw_ === 'function') {
+      CSA_DEV053_CoP_BuildQueueFromRaw_('test5');
+    } else {
+      return { ok: false, phase: 'build_queue', error: 'Missing function: CSA_DEV053_CoP_BuildQueueFromRaw_' };
+    }
+  }
+
+  // Freeze queue to values-only
+  if (typeof CSA_DEV053_CoP_FreezeQueue_ === 'function') {
+    CSA_DEV053_CoP_FreezeQueue_('test5');
+  } else {
+    // Minimal fallback freeze (values-only) using display values
+    csa_QA_DEV058__freezeQueueFallback_('test5_poc_ingest_queue', 5);
+  }
+
+  // Ingest commit
+  if (typeof CSA_DEV053_RunLaneIngest_Batch_Commit_ === 'function') {
+    CSA_DEV053_RunLaneIngest_Batch_Commit_('test5');
+  } else if (typeof CSA_DEV053_RunIngest_ === 'function') {
+    // Fallback (less ideal; depends on script properties/prefix logic)
+    CSA_DEV053_RunIngest_();
+  } else {
+    return { ok: false, phase: 'ingest', error: 'Missing ingest runner: CSA_DEV053_RunLaneIngest_Batch_Commit_ (and CSA_DEV053_RunIngest_) not found' };
+  }
+
+  return { ok: true, phase: 'A_done', snapshot: csa_QA_DEV058_Snapshot_Test5() };
+}
+
+
+/* ============================
+   INTERNAL HELPERS
+   ============================ */
+
+function csa_QA_DEV058__openSpreadsheet_() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var ssId = props.CSA_SPREADSHEET_ID;
+  try {
+    if (ssId) return SpreadsheetApp.openById(ssId);
+  } catch (e) {}
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+function csa_QA_DEV058__getKeyProps_() {
+  var p = PropertiesService.getScriptProperties();
+  return {
+    CSA_ENV: p.getProperty('CSA_ENV'),
+    CSA_SHEET_PREFIX: p.getProperty('CSA_SHEET_PREFIX'),
+    CSA_INGEST_PREFIX: p.getProperty('CSA_INGEST_PREFIX'),
+    CSA_SPREADSHEET_ID: p.getProperty('CSA_SPREADSHEET_ID')
+  };
+}
+
+function csa_QA_DEV058__normPrefix_(p) {
+  p = String(p || '').trim();
+  p = p.replace(/_+$/g, '');
+  return p;
+}
+
+function csa_QA_DEV058__nowMstIso_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss");
+}
+
+function csa_QA_DEV058__setHeader_(sheet, headers) {
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+}
+
+function csa_QA_DEV058__readHeader_(sheet, width) {
+  width = Math.max(1, width || sheet.getLastColumn() || 1);
+  var vals = sheet.getRange(1, 1, 1, width).getDisplayValues();
+  return vals && vals[0] ? vals[0].map(function (x) { return String(x || '').trim(); }) : [];
+}
+
+function csa_QA_DEV058__arrEq_(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (String(a[i] || '').trim() !== String(b[i] || '').trim()) return false;
+  }
+  return true;
+}
+
+function csa_QA_DEV058__ensureHeader_(sheet, headers, options) {
+  options = options || {};
+  var mode = options.mode || 'SET_IF_MISSING'; // SET_IF_MISSING | VERIFY_ONLY
+
+  var got = csa_QA_DEV058__readHeader_(sheet, headers.length);
+  var ok = csa_QA_DEV058__arrEq_(headers, got);
+
+  if (mode === 'VERIFY_ONLY') {
+    return { ok: ok, want: headers, got: got };
+  }
+
+  if (!ok) {
+    csa_QA_DEV058__setHeader_(sheet, headers);
+    return { ok: true, action: 'SET_HEADER', want: headers, got: got };
+  }
+
+  return { ok: true, action: 'NOOP', want: headers, got: got };
+}
+
+function csa_QA_DEV058__clearBelowHeader_(sheet) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  if (lastRow <= 1) return;
+  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+}
+
+function csa_QA_DEV058__freezeQueueFallback_(queueSheetName, width) {
+  var ss = csa_QA_DEV058__openSpreadsheet_();
+  var sh = ss.getSheetByName(queueSheetName);
+  if (!sh) throw new Error('Freeze fallback: missing sheet ' + queueSheetName);
+
+  var lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok: true, frozen_rows: 0 };
+
+  width = Math.max(1, width || sh.getLastColumn());
+  var rng = sh.getRange(2, 1, lastRow - 1, width);
+
+  // RawPubDate column (5) to TEXT
+  if (width >= 5) {
+    sh.getRange(2, 5, lastRow - 1, 1).setNumberFormat('@');
+  }
+
+  var vals = rng.getDisplayValues();
+  rng.setValues(vals);
+  return { ok: true, frozen_rows: (lastRow - 1) };
+}
+
+function csa_QA_DEV058__err_(e) {
+  try {
+    return {
+      name: e && e.name ? String(e.name) : 'Error',
+      message: e && e.message ? String(e.message) : String(e),
+      stack: e && e.stack ? String(e.stack) : ''
+    };
+  } catch (_) {
+    return { name: 'Error', message: 'Unserializable error', stack: '' };
+  }
+}
