@@ -1,0 +1,82 @@
+/**
+ * @file_name: CSA_GAS_SourceBackup_OnDemand.gs
+ * @title: CSA — On-Demand GAS Source Backup
+ * @product: CSA_v1 — Church Safety Alerts
+ * @version: v1.0.2
+ * @binder_type: Operations / Safeguards
+ * @current_phase: Stable Checkpoint
+ * @thread_lineage: DEV021 → DEV024
+ * @create_date: 2026-01-17 10:08 MST
+ * @last_updated: 2026-01-17 18:39 MST
+ * @authors:
+ *   Tim Caldwell
+ *   G (DEV017-Author)
+ *
+ * PURPOSE
+ * -------
+ * Manual, on-demand extraction of the *live* Apps Script project source
+ * using the Apps Script REST API.
+ *
+ * CONFIGURATION
+ * -------------
+ * Script Property (required):
+ *   CSA_GAS_BACKUP_FOLDER_ID
+ *
+ * GUARANTEES
+ * ----------
+ * - No triggers
+ * - No deployments
+ * - No Git / CLASP dependency
+ * - Byte-faithful source pull
+ * - Deterministic Drive destination
+ */
+
+function CSA_Backup_GAS_Source_OnDemand() {
+  const SCRIPT_ID = ScriptApp.getScriptId();
+  const TOKEN = ScriptApp.getOAuthToken();
+
+  const folderId = PropertiesService
+    .getScriptProperties()
+    .getProperty('CSA_GAS_BACKUP_FOLDER_ID');
+
+  if (!folderId) {
+    throw new Error(
+      'Missing Script Property: CSA_GAS_BACKUP_FOLDER_ID'
+    );
+  }
+
+  const parent = DriveApp.getFolderById(folderId);
+
+  const url = 'https://script.googleapis.com/v1/projects/' + SCRIPT_ID + '/content';
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: {
+      Authorization: 'Bearer ' + TOKEN
+    },
+    muteHttpExceptions: false
+  });
+
+  const payload = JSON.parse(response.getContentText());
+  const files = payload.files || [];
+
+  if (!files.length) {
+    throw new Error('No GAS files returned. Backup aborted.');
+  }
+
+  const ts = Utilities.formatDate(
+    new Date(),
+    'America/Phoenix',
+    'yyyyMMdd_HHmmss'
+  );
+
+  const folder = parent.createFolder('CSA_GAS_BACKUP_' + ts);
+
+  files.forEach(function (file) {
+    const name = file.name + '.' + file.type.toLowerCase();
+    const content = file.source || '';
+    folder.createFile(name, content, MimeType.PLAIN_TEXT);
+  });
+
+  Logger.log('CSA GAS Source Backup complete: ' + folder.getName());
+}
