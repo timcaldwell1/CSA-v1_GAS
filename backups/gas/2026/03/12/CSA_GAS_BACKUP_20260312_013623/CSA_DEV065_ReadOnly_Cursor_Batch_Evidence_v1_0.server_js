@@ -1,0 +1,69 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_DEV065_ReadOnly_Cursor_Batch_Evidence_v1_0.gs
+ * title: DEV065 — Read-Only Cursor/Batch Evidence Probe
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: GOVERNED — READ ONLY
+ *
+ * thread_lineage:
+ * DEV064 → DEV065
+ *
+ * last_updated: 2026-03-12 MST
+ *
+ * execution_role:
+ * Read-only diagnostic surface for current lane/cursor/batch posture.
+ *
+ * governance_classification:
+ * H0 — Diagnostic surface
+ *
+ * mutation_surface:
+ * NONE — no writes
+ *
+ * description:
+ * Logs current ingest posture and explains likely meaning of cursor value.
+ * --------------------------------------------------------------------
+ */
+
+function RUN_DEV065_ReadOnly_Cursor_Batch_Evidence() {
+  var props = PropertiesService.getScriptProperties();
+  var ssId = String(props.getProperty('CSA_SPREADSHEET_ID') || '');
+  var ingestPrefix = String(props.getProperty('CSA_INGEST_PREFIX') || '').trim();
+  var lane = ingestPrefix.replace(/_+$/g, '');
+  var cursorKey = 'CSA_DEV053_CURSOR_' + lane;
+
+  var snapshot = {
+    timestamp_mst: Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST',
+    CSA_ENV: props.getProperty('CSA_ENV'),
+    CSA_SHEET_PREFIX: props.getProperty('CSA_SHEET_PREFIX'),
+    CSA_INGEST_PREFIX: props.getProperty('CSA_INGEST_PREFIX'),
+    CSA_TEMPLATE_PREFIX: props.getProperty('CSA_TEMPLATE_PREFIX'),
+    CSA_DEV053_BATCH_SIZE: props.getProperty('CSA_DEV053_BATCH_SIZE'),
+    cursor_key: cursorKey,
+    cursor_value: props.getProperty(cursorKey)
+  };
+
+  if (ssId && ingestPrefix) {
+    try {
+      var ss = SpreadsheetApp.openById(ssId);
+      var queueName = lane + '_poc_ingest_queue';
+      var sh = ss.getSheetByName(queueName);
+      snapshot.queue_sheet = queueName;
+      snapshot.queue_last_row = sh ? sh.getLastRow() : 'MISSING';
+      snapshot.queue_last_col = sh ? sh.getLastColumn() : 'MISSING';
+
+      if (sh && sh.getLastRow() >= 2) {
+        snapshot.interpretation =
+          'If cursor=' + snapshot.cursor_value +
+          ' and queue_last_row=' + sh.getLastRow() +
+          ', that usually means prior ingest advanced to the next unread row.';
+      }
+    } catch (err) {
+      snapshot.queue_probe_error = String(err);
+    }
+  }
+
+  Logger.log('[DEV065][READ_ONLY_EVIDENCE] %s', JSON.stringify(snapshot));
+  return { ok: true, evidence: snapshot };
+}
