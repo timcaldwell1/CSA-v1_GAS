@@ -1,0 +1,51 @@
+/**
+ * --------------------------------------------------------------------
+ * file_name: CSA_DEV065_Set_Test5_Cursor_Batch_v1_0.gs
+ * title: DEV065 — Controlled setter for test5 cursor and batch
+ * product: CSA_v1 — Church Safety Alerts
+ * artifact_namespace: CSA_v1.1
+ * version: v1.0
+ * status: GOVERNED — CONTROLLED MUTATOR
+ *
+ * thread_lineage:
+ * DEV064 → DEV065
+ *
+ * last_updated: 2026-03-12 MST
+ *
+ * execution_role:
+ * Controlled Script Properties setter for test5 ingest posture.
+ *
+ * governance_classification:
+ * H1 — Explicit property mutation utility
+ *
+ * mutation_surface:
+ * SCRIPT_PROPERTIES — test5 ingest state only
+ *
+ * description:
+ * Sets test5 cursor and batch under explicit operator action and logs readback.
+ * --------------------------------------------------------------------
+ */
+
+function RUN_DEV065_Set_Test5_Cursor2_Batch20() {
+  var props = PropertiesService.getScriptProperties();
+  var env = String(props.getProperty('CSA_ENV') || '').toUpperCase();
+
+  if (env === 'PROD') {
+    throw new Error('DEV065: Refused CSA_ENV=PROD.');
+  }
+
+  props.setProperty('CSA_DEV053_CURSOR_test5', '2');
+  props.setProperty('CSA_DEV053_BATCH_SIZE', '20');
+
+  var out = {
+    ok: true,
+    timestamp_mst: Utilities.formatDate(new Date(), 'America/Phoenix', 'yyyy-MM-dd HH:mm:ss') + ' MST',
+    CSA_ENV: props.getProperty('CSA_ENV'),
+    CSA_INGEST_PREFIX: props.getProperty('CSA_INGEST_PREFIX'),
+    CSA_DEV053_CURSOR_test5: props.getProperty('CSA_DEV053_CURSOR_test5'),
+    CSA_DEV053_BATCH_SIZE: props.getProperty('CSA_DEV053_BATCH_SIZE')
+  };
+
+  Logger.log('[DEV065][SETTER] %s', JSON.stringify(out));
+  return out;
+}
