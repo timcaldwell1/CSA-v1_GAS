@@ -1,0 +1,40 @@
+/**
+ * --------------------------------------------------------------------
+ * Temporary Runner — DEV041 Transition
+ * Purpose: Restore Run/Debug access during hygiene.
+ * This file will be replaced by CSA_ToolRunner.gs post-verification.
+ * --------------------------------------------------------------------
+ */
+
+/**
+ * DEV-only. Creates the PoC spreadsheet scaffold.
+ * Safe: No PROD writes.
+ */
+// Comment out per DEV0505 Hygiene 2026-02-20 10:00 PM MST -tim
+/*
+function _ARCHIVE_RUN_DEV046_Create_PoC_Spreadsheet() {
+//  CSA_DEV046_Create_PoC_Spreadsheet_();
+}
+/*
+/**
+ * PROD-safe, read-only.
+ * Verifies current state against the stable checkpoint baseline.
+ */
+// Comment out per DEV0505 Hygiene 2026-02-20 9:15 PM MST -tim
+/*
+function RUN_PROD_VerifyStableCheckpoint() {
+  CSA_DEV041_VerifyStableCheckpoint_();
+}
+*/
+
+
+/**
+ * PROD-safe, read-only.
+ * Captures a baseline snapshot (run ONCE per checkpoint).
+ */
+// Comment out per DEV0505 Hygiene 2026-02-20 9:15 PM MST -tim
+/*
+//function RUN_PROD_CaptureStableCheckpointBaseline() {
+  CSA_DEV041_CaptureStableCheckpointBaseline_();
+}
+*/
